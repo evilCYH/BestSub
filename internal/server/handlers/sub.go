@@ -70,6 +70,13 @@ func createSub(c *gin.Context) {
 		return
 	}
 	cron.FetchAdd(&subData)
+	if subData.Enable {
+		result := cron.FetchRun(subData.ID)
+		respData := subData.GenResponse(cron.FetchStatus(subData.ID), node.GetSubInfo(subData.ID))
+		respData.Result = result
+		resp.Success(c, respData)
+		return
+	}
 	respData := subData.GenResponse(cron.FetchStatus(subData.ID), node.GetSubInfo(subData.ID))
 	resp.Success(c, respData)
 }
