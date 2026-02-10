@@ -67,6 +67,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         const initAuth = async () => {
             try {
+                const token = await tokenManager.getValidToken()
+                if (!token) {
+                    setUser(null)
+                    return
+                }
                 const currentUser = await api.getUserInfo()
                 setUser(currentUser)
             } catch (error) {
