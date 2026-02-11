@@ -1,7 +1,7 @@
 import { Route } from './core/context'
 
 import { DashboardPage } from '@/src/components/features/home/dashboard'
-import { SubPage, CheckPage, SharePage, StoragePage, NotifyPage, LoginPage } from '@/src/components/features'
+import { SubPage, CheckPage, SharePage, StoragePage, NotifyPage, LoginPage, NodesPage } from '@/src/components/features'
 import { APP_ROUTES } from '@/src/lib/config/config'
 export const routes: Route[] = [
   {
@@ -51,6 +51,14 @@ export const routes: Route[] = [
     protected: true,
     preloadImport: () => import('@/src/components/features/storage/storage'),
     priority: 'low',
+  },
+  {
+    path: APP_ROUTES.NODE.path,
+    component: NodesPage,
+    title: APP_ROUTES.NODE.title,
+    protected: true,
+    preloadImport: () => import('@/src/components/features/node'),
+    priority: 'normal',
   },
   {
     path: APP_ROUTES.NOTIFY.path,

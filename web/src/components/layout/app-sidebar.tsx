@@ -8,6 +8,7 @@ import {
   IconShare,
   IconDatabase,
   IconBell,
+  IconServer2,
 
   IconHelp,
   IconInnerShadowTop,
@@ -42,6 +43,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       title: APP_ROUTES.SUB.title,
       url: APP_ROUTES.SUB.path,
       icon: IconLink,
+    },
+    {
+      title: APP_ROUTES.NODE.title,
+      url: APP_ROUTES.NODE.path,
+      icon: IconServer2,
     },
     {
       title: APP_ROUTES.CHECK.title,

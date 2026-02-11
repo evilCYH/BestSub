@@ -20,9 +20,9 @@ type Data struct {
 }
 
 type Base struct {
-	Raw       []byte
-	SubId     uint16
-	UniqueKey uint64
+	Raw       []byte `json:"-"`
+	SubId     uint16 `json:"sub_id"`
+	UniqueKey uint64 `json:"unique_key"`
 }
 
 type UniqueKey struct {
@@ -36,13 +36,13 @@ type UniqueKey struct {
 }
 
 type Info struct {
-	SpeedUp     generic.Queue[uint32]
-	SpeedDown   generic.Queue[uint32]
-	Delay       generic.Queue[uint16]
-	Risk        uint8
-	AliveStatus uint64
-	IP          uint32
-	Country     string
+	SpeedUp     generic.Queue[uint32] `json:"-"`
+	SpeedDown   generic.Queue[uint32] `json:"-"`
+	Delay       generic.Queue[uint16] `json:"-"`
+	Risk        uint8                 `json:"risk"`
+	AliveStatus uint64                `json:"alive_status"`
+	IP          uint32                `json:"ip"`
+	Country     string                `json:"country"`
 }
 
 type SimpleInfo struct {

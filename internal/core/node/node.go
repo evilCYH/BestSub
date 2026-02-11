@@ -19,6 +19,7 @@ import (
 	"github.com/bestruirui/bestsub/internal/database/op"
 	nodeModel "github.com/bestruirui/bestsub/internal/models/node"
 	"github.com/bestruirui/bestsub/internal/models/setting"
+	"github.com/bestruirui/bestsub/internal/utils/generic"
 	"github.com/bestruirui/bestsub/internal/utils/log"
 )
 
@@ -173,7 +174,11 @@ func ForEach(fn func(node []byte)) {
 func GetAll() []nodeModel.Data {
 	poolMutex.RLock()
 	defer poolMutex.RUnlock()
-	return pool
+	result := make([]nodeModel.Data, len(pool))
+	for i, n := range pool {
+		result[i] = copyNodeData(n)
+	}
+	return result
 }
 
 func GetBySubIdExclude(subId []uint16) []uint16 {
@@ -194,7 +199,7 @@ func GetBySubId(subId []uint16) *[]nodeModel.Data {
 	var result []nodeModel.Data
 	for _, node := range pool {
 		if slices.Contains(subId, node.Base.SubId) {
-			result = append(result, node)
+			result = append(result, copyNodeData(node))
 		}
 	}
 	return &result
@@ -236,9 +241,32 @@ func GetByFilter(filter nodeModel.Filter) *[]nodeModel.Data {
 		if filter.RiskLessThan != 0 && node.Info.Risk > filter.RiskLessThan {
 			continue
 		}
-		result = append(result, node)
+		result = append(result, copyNodeData(node))
 	}
 	return &result
+}
+
+func copyNodeData(node nodeModel.Data) nodeModel.Data {
+	if node.Info == nil {
+		return node
+	}
+	info := *node.Info
+	info.SpeedUp = cloneQueue(info.SpeedUp)
+	info.SpeedDown = cloneQueue(info.SpeedDown)
+	info.Delay = cloneQueue(info.Delay)
+	return nodeModel.Data{
+		Base: node.Base,
+		Info: &info,
+	}
+}
+
+func cloneQueue[T generic.Integer](q generic.Queue[T]) generic.Queue[T] {
+	data := append([]T(nil), q.Data...)
+	return generic.Queue[T]{
+		Data: data,
+		Ptr:  q.Ptr,
+		Full: q.Full,
+	}
 }
 
 func mergeNodesToPool(newNodes []nodeModel.Data) int {

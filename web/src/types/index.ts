@@ -28,3 +28,6 @@ export * from './setting'
 
 // 更新相关类型
 export * from './update'
+
+// 节点相关类型
+export * from './node'
