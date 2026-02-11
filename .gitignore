@@ -13,7 +13,11 @@ build
 # vscode
 .vscode
 
-
 # data
 data
 internal/core/subconv/subconv.es5.js
+session/
+
+# misc
+config.json
+docs/feature/*
