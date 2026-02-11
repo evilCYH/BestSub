@@ -1,4 +1,5 @@
 import { SHARE_CONSTANTS } from '../constants'
+import { API_PATH } from '@/src/lib/config/config'
 import type { ShareRequest } from '@/src/types'
 
 /**
@@ -17,7 +18,9 @@ export function generateToken(): string {
  * 构建分享链接
  */
 export function buildShareUrl(token: string, baseUrl?: string): string {
-    const origin = baseUrl || (typeof window !== 'undefined' ? window.location.origin : '')
+    const normalizedBase = baseUrl?.replace(/\/$/, '')
+    const apiBase = API_PATH.base
+    const origin = normalizedBase || apiBase || (typeof window !== 'undefined' ? window.location.origin : '')
     return `${origin}/api/v1/share/sub/${token}`
 }
 
