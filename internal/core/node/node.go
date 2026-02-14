@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/gob"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"path"
 	"slices"
@@ -44,8 +45,20 @@ func InitNodePool(size int) {
 		os.Remove(sessionFile)
 		return
 	}
-	for _, node := range pool {
-		nodeExist.Add(node.Base.UniqueKey)
+	for i := range pool {
+		nodeExist.Add(pool[i].Base.UniqueKey)
+		// 确保 Queue 正确初始化
+		if pool[i].Info != nil {
+			if pool[i].Info.Delay.Data == nil {
+				pool[i].Info.Delay = *generic.NewQueue[uint16](5)
+			}
+			if pool[i].Info.SpeedUp.Data == nil {
+				pool[i].Info.SpeedUp = *generic.NewQueue[uint32](5)
+			}
+			if pool[i].Info.SpeedDown.Data == nil {
+				pool[i].Info.SpeedDown = *generic.NewQueue[uint32](5)
+			}
+		}
 	}
 }
 
@@ -114,11 +127,23 @@ func Add(node *[]nodeModel.Base) int {
 					defer client.Release()
 					ctx, cancel := context.WithTimeout(context.Background(), time.Duration(op.GetSettingInt(setting.NODE_TEST_TIMEOUT))*time.Second)
 					defer cancel()
-					request, err := http.NewRequestWithContext(ctx, "GET", op.GetSettingStr(setting.NODE_TEST_URL), nil)
+
+					// 使用 httptrace 测量首字节时间
+					var firstByteTime time.Time
+					startTime := time.Now()
+
+					trace := &httptrace.ClientTrace{
+						GotFirstResponseByte: func() {
+							firstByteTime = time.Now()
+						},
+					}
+
+					reqCtx := httptrace.WithClientTrace(ctx, trace)
+					request, err := http.NewRequestWithContext(reqCtx, "GET", op.GetSettingStr(setting.NODE_TEST_URL), nil)
 					if err != nil {
 						return
 					}
-					start := time.Now()
+
 					response, err := client.Do(request)
 					if err != nil {
 						return
@@ -128,8 +153,17 @@ func Add(node *[]nodeModel.Base) int {
 						return
 					}
 
+					// 确保获取到首字节时间
+					if firstByteTime.IsZero() {
+						firstByteTime = time.Now()
+					}
+
 					var info nodeModel.Info
-					info.Delay.Update(uint16(time.Since(start).Milliseconds()))
+					// 正确初始化 Queue，设置容量为 5
+					info.Delay = *generic.NewQueue[uint16](5)
+					info.SpeedUp = *generic.NewQueue[uint32](5)
+					info.SpeedDown = *generic.NewQueue[uint32](5)
+					info.Delay.Update(uint16(firstByteTime.Sub(startTime).Milliseconds()))
 					info.SetAliveStatus(nodeModel.Alive, true)
 					rawCopy := append([]byte(nil), n.Raw...)
 					n.Raw = rawCopy
@@ -261,6 +295,10 @@ func copyNodeData(node nodeModel.Data) nodeModel.Data {
 }
 
 func cloneQueue[T generic.Integer](q generic.Queue[T]) generic.Queue[T] {
+	// 如果原队列为空（未初始化），创建一个新的队列
+	if q.Data == nil {
+		return *generic.NewQueue[T](5)
+	}
 	data := append([]T(nil), q.Data...)
 	return generic.Queue[T]{
 		Data: data,

@@ -32,7 +32,10 @@ var clientPool = sync.Pool{
 var transportPool = sync.Pool{
 	New: func() interface{} {
 		return &http.Transport{
-			DisableKeepAlives:     true,
+			DisableKeepAlives:     false,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+			IdleConnTimeout:       90 * time.Second,
 			TLSHandshakeTimeout:   30 * time.Second,
 			ExpectContinueTimeout: 10 * time.Second,
 			ResponseHeaderTimeout: 30 * time.Second,

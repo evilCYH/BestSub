@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptrace"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,7 +23,7 @@ import (
 type Alive struct {
 	URL         string `json:"url" name:"测试链接" value:"https://www.gstatic.com/generate_204"`
 	ExptectCode int    `json:"exptect_code" name:"期望状态码" value:"204"`
-	Thread      int    `json:"thread" name:"线程数" value:"100"`
+	Thread      int    `json:"thread" name:"线程数" value:"30"`
 	Timeout     int    `json:"timeout" name:"超时时间" value:"10" desc:"单个节点检测的超时时间(s)"`
 }
 type Result struct {
@@ -77,20 +78,19 @@ func (e *Alive) Run(ctx context.Context, log *log.Logger, subID []uint16) checkM
 				log.Warnf("yaml.Unmarshal failed: %v", err)
 				return
 			}
-			start := time.Now()
-			alive := e.detect(ctx, raw)
+			delay, alive := e.detectWithDelay(ctx, raw)
 			if alive {
 				log.Debugf("Node %s is alive ✔", raw["name"].(string))
 				atomic.AddInt64(&aliveCount, 1)
 				n.Info.SetAliveStatus(nodeModel.Alive, true)
-				n.Info.Delay.Update(uint16(time.Since(start).Milliseconds()))
+				n.Info.Delay.Update(delay)
 				log.Debugf("Node %s delay: %dms", raw["name"].(string), n.Info.Delay.Average())
 				atomic.AddInt64(&totalDelay, int64(n.Info.Delay.Average()))
 			} else {
 				log.Debugf("Node %s is dead ✘", raw["name"].(string))
 				atomic.AddInt64(&deadCount, 1)
 				n.Info.SetAliveStatus(nodeModel.Alive, false)
-				n.Info.Delay.Update(uint16(65535))
+				// 失败时不更新延迟，保持上一次成功的延迟值
 			}
 
 		})
@@ -130,6 +130,48 @@ func (e *Alive) detect(ctx context.Context, raw map[string]any) bool {
 	}
 	defer response.Body.Close()
 	return response.StatusCode == e.ExptectCode
+}
+
+// detectWithDelay 使用 httptrace 测量首字节时间(TTFB)，返回延迟和是否存活
+func (e *Alive) detectWithDelay(ctx context.Context, raw map[string]any) (uint16, bool) {
+	client := mihomo.Proxy(raw)
+	if client == nil {
+		return 0, false
+	}
+	client.Timeout = time.Duration(e.Timeout) * time.Second
+	defer client.Release()
+
+	var firstByteTime time.Time
+	startTime := time.Now()
+
+	trace := &httptrace.ClientTrace{
+		GotFirstResponseByte: func() {
+			firstByteTime = time.Now()
+		},
+	}
+
+	reqCtx := httptrace.WithClientTrace(ctx, trace)
+	request, err := http.NewRequestWithContext(reqCtx, "GET", e.URL, nil)
+	if err != nil {
+		return 0, false
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		return 0, false
+	}
+	defer response.Body.Close()
+
+	// 确保我们获取到了首字节时间
+	if firstByteTime.IsZero() {
+		firstByteTime = time.Now()
+	}
+
+	delay := uint16(firstByteTime.Sub(startTime).Milliseconds())
+	if response.StatusCode == e.ExptectCode {
+		return delay, true
+	}
+	return delay, false
 }
 
 func init() {
