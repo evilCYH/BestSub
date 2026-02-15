@@ -1,6 +1,6 @@
 import { API_PATH } from '../config/config'
 import { tokenManager } from './token-manager'
-import type { LoginResponse, UserInfo, ApiResponse, SubResponse, CheckResponse, CheckRequest, SubRequest, DynamicConfigItem, SubNameAndID, NotifyResponse, NotifyRequest, NotifyTemplate, NotifyChannel, NotifyChannelConfigResponse, ShareResponse, ShareRequest, Setting, ChangePasswordRequest, UpdateUserInfoRequest, UpdateResponse, UpdateComponent, SystemVersion, NodeResponse } from '@/src/types'
+import type { LoginResponse, UserInfo, ApiResponse, SubResponse, CheckResponse, CheckRequest, SubRequest, DynamicConfigItem, SubNameAndID, NotifyResponse, NotifyRequest, NotifyTemplate, NotifyChannel, NotifyChannelConfigResponse, ShareResponse, ShareRequest, Setting, ChangePasswordRequest, UpdateUserInfoRequest, UpdateResponse, UpdateComponent, SystemVersion, NodeResponse, NodeUpdateLogResponse, NodeTestLogResponse } from '@/src/types'
 
 const DEFAULT_REQUEST_HEADERS: Record<string, string> = {}
 
@@ -235,6 +235,26 @@ export const api = {
   async getNodes(subId?: number): Promise<NodeResponse[]> {
     const url = subId ? `${API_PATH.node}?sub_id=${subId}` : API_PATH.node
     const response = await apiClient.get<ApiResponse<NodeResponse[]>>(url)
+    return response.data
+  },
+
+  async getNodeUpdateLog(subId: number, limit = 5): Promise<NodeUpdateLogResponse> {
+    const response = await apiClient.get<ApiResponse<NodeUpdateLogResponse>>(`${API_PATH.node}/log?sub_id=${subId}&limit=${limit}`)
+    return response.data
+  },
+
+  async getNodeTestLogs(params: {
+    subId: number
+    level?: string | undefined
+    keyword?: string | undefined
+    page: number
+    pageSize: number
+  }): Promise<NodeTestLogResponse> {
+    const { subId, level, keyword, page, pageSize } = params
+    let url = `${API_PATH.node}/log/detail?sub_id=${subId}&page=${page}&page_size=${pageSize}`
+    if (level) url += `&level=${encodeURIComponent(level)}`
+    if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`
+    const response = await apiClient.get<ApiResponse<NodeTestLogResponse>>(url)
     return response.data
   },
 

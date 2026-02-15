@@ -1,5 +1,6 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/src/components/ui/dialog"
 import { formatTime, formatLastRunTime, getNextCronRunTime, formatDuration } from "@/src/utils"
+import { useNodeUpdateLog } from "@/src/lib/queries/node-log-queries"
 import StatusBadge from "@/src/components/shared/status-badge"
 import type { SubResponse } from "@/src/types/sub"
 
@@ -14,6 +15,9 @@ export function SubDetail({
     isOpen,
     onOpenChange,
 }: SubscriptionDetailProps) {
+    const { data: nodeLogData } = useNodeUpdateLog(subscription?.id ?? null, 5)
+    const latestLog = nodeLogData?.latest
+
     if (!subscription) return null
 
     const formatSpeed = (speed: number) => ((speed || 0) / 1024 / 1024).toFixed(2)
@@ -65,23 +69,29 @@ export function SubDetail({
                     </div>
 
                     <div>
-                        <h3 className="font-semibold mb-2">节点信息</h3>
+                        <h3 className="font-semibold mb-2">节点表现</h3>
                         <div className="grid grid-cols-3 gap-4 text-sm">
                             <div className="space-y-2">
                                 <div className="text-muted-foreground"><span>原始节点:</span> <span className="font-medium">{subscription.result?.raw_count || 0}</span></div>
                                 <div className="text-muted-foreground"><span>入库节点:</span> <span className="font-medium text-green-600">{subscription.info?.count || 0}</span></div>
+                                <div className="text-muted-foreground"><span>候选节点:</span> <span className="font-medium">{latestLog?.candidate ?? 0}</span></div>
+                                <div className="text-muted-foreground"><span>重复节点:</span> <span className="font-medium">{latestLog?.duplicate ?? 0}</span></div>
                             </div>
                             <div className="space-y-2">
                                 <div className="text-muted-foreground"><span>平均上行:</span> {formatSpeed(subscription.info?.speed_up)} MB/s</div>
                                 <div className="text-muted-foreground"><span>平均下行:</span> {formatSpeed(subscription.info?.speed_down)} MB/s</div>
-                            </div>
-                            <div className="space-y-2">
                                 <div className="text-muted-foreground"><span>平均延迟:</span> {subscription.info?.delay || 0} ms</div>
                                 <div className="text-muted-foreground"><span>风险等级:</span>
                                     <span className={`font-medium ml-1 ${getRiskColor(subscription.info?.risk || 0)}`}>
                                         {subscription.info?.risk || 0}/10
                                     </span>
                                 </div>
+                            </div>
+                            <div className="space-y-2">
+                                <div className="text-muted-foreground"><span>无效节点:</span> <span className="font-medium">{latestLog?.invalid ?? 0}</span></div>
+                                <div className="text-muted-foreground"><span>初测失败:</span> <span className="font-medium">{latestLog?.test_failed ?? 0}</span></div>
+                                <div className="text-muted-foreground"><span>通过初测:</span> <span className="font-medium text-green-600">{latestLog?.accepted ?? 0}</span></div>
+                                <div className="text-muted-foreground"><span>被淘汰:</span> <span className="font-medium">{latestLog?.dropped ?? 0}</span></div>
                             </div>
                         </div>
                     </div>

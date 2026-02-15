@@ -2,7 +2,7 @@ import { useCallback } from "react"
 import { Button } from "@/src/components/ui/button"
 import { Card, CardContent } from "@/src/components/ui/card"
 import { InlineLoading } from "@/src/components/ui/loading"
-import { RefreshCw, Edit, Trash2 } from "lucide-react"
+import { RefreshCw, Edit, Trash2, FileText } from "lucide-react"
 import { toast } from "sonner"
 import { formatLastRunTime } from "@/src/utils"
 import { StatusBadge } from "@/src/components/shared/status-badge"
@@ -14,11 +14,13 @@ import type { SubResponse } from "@/src/types/sub"
 interface SubscriptionListProps {
     onEdit: (subscription: SubResponse) => void
     onShowDetail: (subscription: SubResponse) => void
+    onShowLogs: (subscription: SubResponse) => void
 }
 
 export function SubList({
     onEdit,
     onShowDetail,
+    onShowLogs,
 }: SubscriptionListProps) {
     const { data: subs = [], isLoading, error } = useSubs()
     const deleteSubMutation = useDeleteSub()
@@ -121,6 +123,13 @@ export function SubList({
                             </div>
 
                             <div className="flex items-center gap-2 sm:justify-end">
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => onShowLogs(sub)}
+                                >
+                                    <FileText className="h-4 w-4" />
+                                </Button>
                                 <Button
                                     size="sm"
                                     variant="outline"

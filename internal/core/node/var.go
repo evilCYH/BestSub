@@ -12,16 +12,17 @@ var (
 	nodeExist   *exist
 	nodeProcess *exist
 
-	wgSync     sync.WaitGroup
-	wgStatus   bool
-	validNodes []nodeModel.Data
-	validMutex sync.Mutex
-
 	refreshMutex   sync.Mutex
 	subInfoMap     = make(map[uint16]nodeModel.SimpleInfo)
 	countryInfoMap = make(map[string]nodeModel.SimpleInfo)
 	subAggBuf      = make(map[uint16]*infoSums)
 	countryAggBuf  = make(map[string]*infoSums)
+	updateLogMu    sync.Mutex
+	updateLogs     = make(map[uint16][]nodeModel.UpdateLog)
+
+	// 节点级详细日志存储
+	nodeTestLogMu    sync.RWMutex
+	nodeTestLogStore = make(map[uint16][]nodeModel.NodeTestLog)
 )
 
 type infoSums struct {

@@ -20,6 +20,10 @@ func init() {
 		AddRoute(
 			router.NewRoute("", router.GET).
 				Handle(getNodes),
+		).
+		AddRoute(
+			router.NewRoute("/log", router.GET).
+				Handle(getNodeUpdateLog),
 		)
 }
 
@@ -99,4 +103,42 @@ func parseSubIDs(raw string) ([]uint16, error) {
 		return nil, errors.New("empty sub_id")
 	}
 	return ids, nil
+}
+
+// getNodeUpdateLog 获取订阅节点更新日志
+// @Summary 获取订阅节点更新日志
+// @Description 获取订阅节点更新日志
+// @Tags 节点
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param sub_id query int true "订阅ID"
+// @Param limit query int false "返回条数"
+// @Success 200 {object} resp.ResponseStruct{data=node.UpdateLogResponse} "获取成功"
+// @Failure 400 {object} resp.ResponseStruct "请求参数错误"
+// @Failure 401 {object} resp.ResponseStruct "未授权"
+// @Router /api/v1/node/log [get]
+func getNodeUpdateLog(c *gin.Context) {
+	subIDStr := strings.TrimSpace(c.Query("sub_id"))
+	if subIDStr == "" {
+		resp.ErrorBadRequest(c)
+		return
+	}
+	parsedID, err := strconv.ParseUint(subIDStr, 10, 16)
+	if err != nil {
+		resp.ErrorBadRequest(c)
+		return
+	}
+	limit := 5
+	if limitStr := strings.TrimSpace(c.Query("limit")); limitStr != "" {
+		parsedLimit, err := strconv.Atoi(limitStr)
+		if err != nil {
+			resp.ErrorBadRequest(c)
+			return
+		}
+		if parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+	resp.Success(c, node.GetUpdateLog(uint16(parsedID), limit))
 }

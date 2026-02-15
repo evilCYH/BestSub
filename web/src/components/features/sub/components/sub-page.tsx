@@ -4,6 +4,7 @@ import { Plus, Upload } from "lucide-react"
 import { SubForm } from "./sub-form"
 import { SubDetail } from "./sub-detail"
 import { SubList } from "./sub-list"
+import { SubLogDialog } from "./sub-log-dialog"
 import { BatchSubForm } from "./batch-sub-form"
 import type { SubResponse } from "@/src/types/sub"
 
@@ -13,6 +14,8 @@ export function SubPage() {
     const [isFormDialogOpen, setIsFormDialogOpen] = useState(false)
     const [isBatchFormDialogOpen, setIsBatchFormDialogOpen] = useState(false)
     const [editingSubscription, setEditingSubscription] = useState<SubResponse | null>(null)
+    const [logSubscription, setLogSubscription] = useState<SubResponse | null>(null)
+    const [isLogDialogOpen, setIsLogDialogOpen] = useState(false)
 
 
     const handleEdit = (subscription: SubResponse) => {
@@ -42,6 +45,11 @@ export function SubPage() {
     const showDetail = (subscription: SubResponse) => {
         setDetailSubscription(subscription)
         setIsDetailDialogOpen(true)
+    }
+
+    const showLogs = (subscription: SubResponse) => {
+        setLogSubscription(subscription)
+        setIsLogDialogOpen(true)
     }
 
     return (
@@ -90,6 +98,7 @@ export function SubPage() {
                 <SubList
                     onEdit={(sub) => handleEdit(sub)}
                     onShowDetail={showDetail}
+                    onShowLogs={showLogs}
                 />
             </div>
 
@@ -97,6 +106,12 @@ export function SubPage() {
                 subscription={detailSubscription}
                 isOpen={isDetailDialogOpen}
                 onOpenChange={setIsDetailDialogOpen}
+            />
+
+            <SubLogDialog
+                subscription={logSubscription}
+                isOpen={isLogDialogOpen}
+                onOpenChange={setIsLogDialogOpen}
             />
         </div>
     )

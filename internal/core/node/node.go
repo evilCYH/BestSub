@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
+	"fmt"
 	"net/http"
 	"net/http/httptrace"
 	"os"
 	"path"
 	"slices"
 	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -87,114 +91,328 @@ type nameNode struct {
 	Name string
 }
 
+// getNodeName 从 raw 配置中获取节点名称
+func getNodeName(raw map[string]any) string {
+	if name, ok := raw["name"].(string); ok && name != "" {
+		return name
+	}
+	if server, ok := raw["server"].(string); ok && server != "" {
+		return server
+	}
+	return "unknown"
+}
+
+// isTimeoutError 判断是否为超时错误
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "deadline exceeded") ||
+		strings.Contains(errStr, "i/o timeout")
+}
+
+// isNetworkError 判断是否为网络错误（非超时）
+func isNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "no such host") ||
+		strings.Contains(errStr, "network is unreachable") ||
+		strings.Contains(errStr, "connection reset")
+}
+
+type addStats struct {
+	subID       uint16
+	start       time.Time
+	rawCount    uint16
+	candidate   uint32
+	duplicate   uint32
+	invalid     uint32
+	testFailed  uint32
+	accepted    uint32
+	validNodes  []nodeModel.Data
+	validMu     sync.Mutex
+	detailMu    sync.Mutex
+	details     []string
+	// 节点级详细日志
+	nodeLogs    []nodeModel.NodeTestLog
+	logMu       sync.Mutex
+	logCounter  uint64 // 自增ID计数器
+}
+
+func newAddStats(subID, rawCount uint16) *addStats {
+	return &addStats{
+		subID:    subID,
+		start:    time.Now(),
+		rawCount: rawCount,
+	}
+}
+
+func (s *addStats) IncCandidate() { atomic.AddUint32(&s.candidate, 1) }
+func (s *addStats) IncDuplicate() { atomic.AddUint32(&s.duplicate, 1) }
+func (s *addStats) IncInvalid()   { atomic.AddUint32(&s.invalid, 1) }
+func (s *addStats) IncFailed()    { atomic.AddUint32(&s.testFailed, 1) }
+
+func (s *addStats) AddValid(node nodeModel.Data) {
+	s.validMu.Lock()
+	s.validNodes = append(s.validNodes, node)
+	s.validMu.Unlock()
+	atomic.AddUint32(&s.accepted, 1)
+}
+
+func (s *addStats) AddDetail(reason string) {
+	s.detailMu.Lock()
+	if len(s.details) < 50 {
+		s.details = append(s.details, reason)
+	}
+	s.detailMu.Unlock()
+}
+
+// AddNodeLog 添加节点级详细日志
+func (s *addStats) AddNodeLog(level, nodeName, message string) {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+
+	// 限制存储数量，避免内存爆炸
+	if len(s.nodeLogs) >= 500 {
+		return
+	}
+
+	s.logCounter++
+	s.nodeLogs = append(s.nodeLogs, nodeModel.NodeTestLog{
+		ID:        s.logCounter,
+		SubID:     s.subID,
+		NodeName:  nodeName,
+		Level:     level,
+		Message:   message,
+		CreatedAt: time.Now(),
+	})
+}
+
+func (s *addStats) Finalize() {
+	merged := 0
+	if len(s.validNodes) > 0 {
+		merged = mergeNodesToPool(s.validNodes)
+		RefreshInfo()
+	}
+	log.Infof("Receipt successful, %d new nodes added", merged)
+
+	candidate := clampToUint16(atomic.LoadUint32(&s.candidate))
+	duplicate := clampToUint16(atomic.LoadUint32(&s.duplicate))
+	invalid := clampToUint16(atomic.LoadUint32(&s.invalid))
+	testFailed := clampToUint16(atomic.LoadUint32(&s.testFailed))
+	accepted := clampToUint16(atomic.LoadUint32(&s.accepted))
+	mergedU16 := clampToUint16(uint32(merged))
+	dropped := uint16(0)
+	if accepted > mergedU16 {
+		dropped = accepted - mergedU16
+	}
+
+	updateLogMu.Lock()
+	updateLogs[s.subID] = append([]nodeModel.UpdateLog{ {
+		SubID:      s.subID,
+		CreatedAt:  time.Now(),
+		DurationMs: uint16(time.Since(s.start).Milliseconds()),
+		RawCount:   s.rawCount,
+		Candidate:  candidate,
+		Duplicate:  duplicate,
+		Invalid:    invalid,
+		TestFailed: testFailed,
+		Accepted:   accepted,
+		Merged:     mergedU16,
+		Dropped:    dropped,
+		Details:    append([]string(nil), s.details...),
+	}}, updateLogs[s.subID]...)
+	if len(updateLogs[s.subID]) > 20 {
+		updateLogs[s.subID] = updateLogs[s.subID][:20]
+	}
+	updateLogMu.Unlock()
+
+	// 保存节点级详细日志
+	if len(s.nodeLogs) > 0 {
+		saveNodeTestLogs(s.subID, s.nodeLogs)
+	}
+}
+
+func clampToUint16(value uint32) uint16 {
+	if value > uint32(^uint16(0)) {
+		return ^uint16(0)
+	}
+	return uint16(value)
+}
+
 func Add(node *[]nodeModel.Base) int {
 	var nodesToProcess []nodeModel.Base
+	var subID uint16
+	if len(*node) > 0 {
+		subID = (*node)[0].SubId
+	}
+	stats := newAddStats(subID, uint16(len(*node)))
 
 	for _, n := range *node {
 		var nameNode nameNode
 		if err := yaml.Unmarshal(n.Raw, &nameNode); err != nil {
 			log.Warnf("yaml.Unmarshal failed: %v", err)
+			stats.IncInvalid()
+			stats.AddDetail("yaml_unmarshal_failed")
 			continue
 		}
 		if !nodeExist.Exist(n.UniqueKey) && !nodeProcess.Exist(n.UniqueKey) {
 			nodeProcess.Add(n.UniqueKey)
+			stats.IncCandidate()
 			nodesToProcess = append(nodesToProcess, n)
 			log.Debugf("add process node: %s", nameNode.Name)
 		} else {
 			log.Debugf("node already exist: %s", nameNode.Name)
+			stats.IncDuplicate()
 		}
 	}
 
 	log.Debugf("add %d nodes to process", len(nodesToProcess))
-
-	if len(nodesToProcess) > 0 {
-		go func() {
-			for _, node := range nodesToProcess {
-				n := node // capture loop variable
-				wgSync.Add(1)
-				task.Submit(func() {
-					defer wgSync.Done()
-					defer nodeProcess.Remove(n.UniqueKey)
-					var raw map[string]any
-					if err := yaml.Unmarshal(n.Raw, &raw); err != nil {
-						log.Warnf("yaml.Unmarshal failed: %v", err)
-						return
-					}
-					client := mihomo.Proxy(raw)
-					if client == nil {
-						return
-					}
-					defer client.Release()
-					ctx, cancel := context.WithTimeout(context.Background(), time.Duration(op.GetSettingInt(setting.NODE_TEST_TIMEOUT))*time.Second)
-					defer cancel()
-
-					// 使用 httptrace 测量首字节时间
-					var firstByteTime time.Time
-					startTime := time.Now()
-
-					trace := &httptrace.ClientTrace{
-						GotFirstResponseByte: func() {
-							firstByteTime = time.Now()
-						},
-					}
-
-					reqCtx := httptrace.WithClientTrace(ctx, trace)
-					request, err := http.NewRequestWithContext(reqCtx, "GET", op.GetSettingStr(setting.NODE_TEST_URL), nil)
-					if err != nil {
-						return
-					}
-
-					response, err := client.Do(request)
-					if err != nil {
-						return
-					}
-					defer response.Body.Close()
-					if response.StatusCode != 204 {
-						return
-					}
-
-					// 确保获取到首字节时间
-					if firstByteTime.IsZero() {
-						firstByteTime = time.Now()
-					}
-
-					var info nodeModel.Info
-					// 正确初始化 Queue，设置容量为 5
-					info.Delay = *generic.NewQueue[uint16](5)
-					info.SpeedUp = *generic.NewQueue[uint32](5)
-					info.SpeedDown = *generic.NewQueue[uint32](5)
-					info.Delay.Update(uint16(firstByteTime.Sub(startTime).Milliseconds()))
-					info.SetAliveStatus(nodeModel.Alive, true)
-					rawCopy := append([]byte(nil), n.Raw...)
-					n.Raw = rawCopy
-					validMutex.Lock()
-					validNodes = append(validNodes, nodeModel.Data{
-						Base: n,
-						Info: &info,
-					})
-					log.Debugf("node: %s test end, Delay: %d", raw["name"].(string), info.Delay.Average())
-					validMutex.Unlock()
-				})
-
-			}
-		}()
-		if !wgStatus {
-			wgStatus = true
-			go func() {
-				time.Sleep(time.Second * 5)
-				wgSync.Wait()
-				mergedNodes := 0
-				if len(validNodes) > 0 {
-					mergedNodes = mergeNodesToPool(validNodes)
-					RefreshInfo()
-				}
-				log.Infof("Receipt successful, %d new nodes added", mergedNodes)
-				validNodes = validNodes[:0]
-				wgStatus = false
-			}()
-		}
+	if len(nodesToProcess) == 0 {
+		stats.Finalize()
+		return 0
 	}
+
+	var wg sync.WaitGroup
+	for _, node := range nodesToProcess {
+		n := node // capture loop variable
+		wg.Add(1)
+		task.Submit(func() {
+			defer wg.Done()
+			defer nodeProcess.Remove(n.UniqueKey)
+			var raw map[string]any
+			if err := yaml.Unmarshal(n.Raw, &raw); err != nil {
+				log.Warnf("yaml.Unmarshal failed: %v", err)
+				stats.IncInvalid()
+				stats.AddDetail("yaml_unmarshal_failed")
+				return
+			}
+
+			// 获取节点名称
+			nodeName := getNodeName(raw)
+
+			// 开始测试 - info 级别
+			stats.AddNodeLog("info", nodeName, "开始节点初测")
+
+			client := mihomo.Proxy(raw)
+			if client == nil {
+				stats.AddNodeLog("error", nodeName, "代理解析失败：配置无效或协议不支持")
+				stats.IncInvalid()
+				stats.AddDetail("proxy_parse_failed")
+				return
+			}
+			defer client.Release()
+
+			testURL := op.GetSettingStr(setting.NODE_TEST_URL)
+			stats.AddNodeLog("info", nodeName, "发送测试请求至 "+testURL)
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(op.GetSettingInt(setting.NODE_TEST_TIMEOUT))*time.Second)
+			defer cancel()
+
+			// 使用 httptrace 测量首字节时间
+			var firstByteTime time.Time
+			startTime := time.Now()
+
+			trace := &httptrace.ClientTrace{
+				GotFirstResponseByte: func() {
+					firstByteTime = time.Now()
+				},
+			}
+
+			reqCtx := httptrace.WithClientTrace(ctx, trace)
+			request, err := http.NewRequestWithContext(reqCtx, "GET", testURL, nil)
+			if err != nil {
+				stats.AddNodeLog("error", nodeName, "创建请求失败: "+err.Error())
+				stats.IncInvalid()
+				stats.AddDetail("request_create_failed")
+				return
+			}
+
+			response, err := client.Do(request)
+			if err != nil {
+				// 根据错误类型区分级别
+				level := "error"
+				errMsg := err.Error()
+				if isTimeoutError(err) {
+					level = "warn"
+					errMsg = "连接超时: " + errMsg
+				} else if isNetworkError(err) {
+					level = "warn"
+					errMsg = "网络错误: " + errMsg
+				} else {
+					errMsg = "请求失败: " + errMsg
+				}
+				stats.AddNodeLog(level, nodeName, errMsg)
+				stats.IncFailed()
+				stats.AddDetail("test_request_failed: " + err.Error())
+				return
+			}
+			defer response.Body.Close()
+
+			if response.StatusCode != 204 {
+				msg := fmt.Sprintf("状态码不符: 期望 204, 实际 %d", response.StatusCode)
+				stats.AddNodeLog("warn", nodeName, msg)
+				stats.IncFailed()
+				stats.AddDetail("unexpected_status: " + response.Status)
+				return
+			}
+
+			// 确保获取到首字节时间
+			if firstByteTime.IsZero() {
+				firstByteTime = time.Now()
+			}
+
+			delay := firstByteTime.Sub(startTime).Milliseconds()
+			stats.AddNodeLog("info", nodeName, fmt.Sprintf("初测通过，延迟: %dms", delay))
+
+			var info nodeModel.Info
+			// 正确初始化 Queue，设置容量为 5
+			info.Delay = *generic.NewQueue[uint16](5)
+			info.SpeedUp = *generic.NewQueue[uint32](5)
+			info.SpeedDown = *generic.NewQueue[uint32](5)
+			info.Delay.Update(uint16(delay))
+			info.SetAliveStatus(nodeModel.Alive, true)
+			rawCopy := append([]byte(nil), n.Raw...)
+			n.Raw = rawCopy
+			stats.AddValid(nodeModel.Data{
+				Base: n,
+				Info: &info,
+			})
+			if rawName, ok := raw["name"].(string); ok {
+				log.Debugf("node: %s test end, Delay: %d", rawName, info.Delay.Average())
+			}
+		})
+	}
+
+	go func() {
+		wg.Wait()
+		stats.Finalize()
+	}()
 	return len(nodesToProcess)
+}
+
+func GetUpdateLog(subID uint16, limit int) nodeModel.UpdateLogResponse {
+	updateLogMu.Lock()
+	defer updateLogMu.Unlock()
+
+	logs := updateLogs[subID]
+	if len(logs) == 0 {
+		return nodeModel.UpdateLogResponse{}
+	}
+	if limit <= 0 || limit > len(logs) {
+		limit = len(logs)
+	}
+	result := make([]nodeModel.UpdateLog, limit)
+	copy(result, logs[:limit])
+	return nodeModel.UpdateLogResponse{
+		Latest:  &result[0],
+		History: result,
+	}
 }
 
 func ForEach(fn func(node []byte)) {
@@ -369,7 +587,7 @@ func GetCountryInfo(country string) nodeModel.SimpleInfo {
 func DeleteBySubId(subID uint16) {
 	poolMutex.Lock()
 	defer poolMutex.Unlock()
-	
+
 	end := len(pool) - 1
 	for i := 0; i <= end; {
 		if pool[i].Base.SubId == subID {
@@ -380,6 +598,67 @@ func DeleteBySubId(subID uint16) {
 			i++
 		}
 	}
-	
+
 	pool = pool[:end+1]
+}
+
+// saveNodeTestLogs 保存节点测试日志
+func saveNodeTestLogs(subID uint16, logs []nodeModel.NodeTestLog) {
+	nodeTestLogMu.Lock()
+	defer nodeTestLogMu.Unlock()
+
+	// 追加到现有日志
+	allLogs := append(logs, nodeTestLogStore[subID]...)
+
+	// 只保留最近 1000 条
+	if len(allLogs) > 1000 {
+		allLogs = allLogs[:1000]
+	}
+
+	nodeTestLogStore[subID] = allLogs
+}
+
+// QueryNodeLogs 查询节点测试日志
+func QueryNodeLogs(query nodeModel.NodeTestLogQuery) ([]nodeModel.NodeTestLog, int64) {
+	nodeTestLogMu.RLock()
+	defer nodeTestLogMu.RUnlock()
+
+	logs := nodeTestLogStore[query.SubID]
+
+	// 筛选和搜索
+	var filtered []nodeModel.NodeTestLog
+	for _, log := range logs {
+		// 级别筛选
+		if query.Level != "" && log.Level != query.Level {
+			continue
+		}
+
+		// 关键词搜索（节点名或日志内容）
+		if query.Keyword != "" {
+			keyword := query.Keyword
+			if !strings.Contains(log.NodeName, keyword) && !strings.Contains(log.Message, keyword) {
+				continue
+			}
+		}
+
+		filtered = append(filtered, log)
+	}
+
+	total := int64(len(filtered))
+
+	// 分页
+	start := (query.Page - 1) * query.PageSize
+	if start < 0 {
+		start = 0
+	}
+	if start > len(filtered) {
+		start = len(filtered)
+	}
+
+	end := start + query.PageSize
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+
+	return filtered[start:end], total
 }
