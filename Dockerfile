@@ -2,6 +2,7 @@
 
 FROM node:20-alpine AS web-build
 WORKDIR /app
+RUN apk add --no-cache git
 COPY web/package.json web/pnpm-lock.yaml web/package-lock.json* web/ ./web/
 RUN cd web && \
     if [ -f pnpm-lock.yaml ]; then npm i -g pnpm && pnpm install; \
@@ -9,8 +10,9 @@ RUN cd web && \
 COPY web/ ./web/
 RUN cd web && npm run build
 
-FROM golang:1.22-alpine AS go-build
+FROM golang:1.24.2-alpine AS go-build
 WORKDIR /app
+RUN apk add --no-cache git
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . ./
