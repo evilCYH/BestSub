@@ -16,7 +16,7 @@ RUN apk add --no-cache git
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . ./
-RUN rm -rf static/out && mv web/out static/
+COPY --from=web-build /app/web/out /app/static/out
 RUN go build -o bestsub ./cmd/bestsub
 
 FROM alpine:3.20
