@@ -3,10 +3,12 @@ package fetch
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -106,8 +108,10 @@ func Do(ctx context.Context, subID uint16, config string) subModel.Result {
 					}
 				}
 			}
+			// 修复订阅转换服务可能返回的错误格式
+			fixedLine := fixProxyConfigIfNeeded(line)
 			nodes = append(nodes, nodeModel.Base{
-				Raw:       line,
+				Raw:       fixedLine,
 				SubId:     subID,
 				UniqueKey: unique.Gen(),
 			})
@@ -124,6 +128,124 @@ func Do(ctx context.Context, subID uint16, config string) subModel.Result {
 	}
 	return createFailureResult("fetch task failed", startTime)
 }
+// fixProxyConfigIfNeeded 修复订阅转换服务返回的错误代理配置格式
+// 某些订阅转换服务会将 http 代理的完整地址 (username:password@host:port) 进行 base64 编码后放入 server 字段
+// 这会导致 Mihomo 无法正确解析，本函数检测并修复这种格式
+func fixProxyConfigIfNeeded(raw []byte) []byte {
+	var proxy map[string]any
+	if err := yaml.Unmarshal(raw, &proxy); err != nil {
+		return raw
+	}
+
+	// 检查 server 字段是否为 base64 编码的完整代理地址
+	server, ok := proxy["server"].(string)
+	if !ok || server == "" {
+		return raw
+	}
+
+	// 尝试 base64 解码
+	decoded, err := base64.StdEncoding.DecodeString(server)
+	if err != nil {
+		// 不是 base64，无需修复
+		return raw
+	}
+
+	decodedStr := string(decoded)
+
+	// 检查解码后是否包含 @ 符号（username:password@host:port 格式）
+	if !strings.Contains(decodedStr, "@") {
+		return raw
+	}
+
+	// 解析 username:password@host:port 格式
+	// 首先分割 @ 符号
+	atIndex := strings.LastIndex(decodedStr, "@")
+	if atIndex == -1 {
+		return raw
+	}
+
+	credsPart := decodedStr[:atIndex]
+	hostPortPart := decodedStr[atIndex+1:]
+
+	// 解析 username:password
+	colonIndex := strings.Index(credsPart, ":")
+	if colonIndex == -1 {
+		return raw
+	}
+
+	username := credsPart[:colonIndex]
+	password := credsPart[colonIndex+1:]
+
+	// 解析 host:port
+	// IPv6 地址处理（包含 [ ]）
+	var host, portStr string
+	if strings.HasPrefix(hostPortPart, "[") {
+		// IPv6 地址
+		bracketEnd := strings.LastIndex(hostPortPart, "]")
+		if bracketEnd == -1 {
+			return raw
+		}
+		host = hostPortPart[1:bracketEnd]
+		if len(hostPortPart) > bracketEnd+1 && hostPortPart[bracketEnd+1] == ':' {
+			portStr = hostPortPart[bracketEnd+2:]
+		}
+	} else {
+		// IPv4 地址或域名
+		lastColon := strings.LastIndex(hostPortPart, ":")
+		if lastColon == -1 {
+			host = hostPortPart
+			portStr = ""
+		} else {
+			host = hostPortPart[:lastColon]
+			portStr = hostPortPart[lastColon+1:]
+		}
+	}
+
+	// 验证并解析端口
+	var port int
+	if portStr != "" {
+		p, err := strconv.Atoi(portStr)
+		if err != nil || p <= 0 || p > 65535 {
+			// 端口无效，使用默认端口
+			port = 443
+		} else {
+			port = p
+		}
+	} else {
+		port = 443
+	}
+
+	// 获取原始代理类型，如果是 https 则改为 http
+	proxyType, _ := proxy["type"].(string)
+	if proxyType == "https" {
+		proxy["type"] = "http"
+	}
+
+	// 重建配置
+	proxy["server"] = host
+	proxy["port"] = port
+	proxy["username"] = username
+	proxy["password"] = password
+	proxy["tls"] = true
+
+	// 删除错误的 sni 字段（如果存在且也是 base64 编码）
+	if sni, ok := proxy["sni"].(string); ok {
+		if _, err := base64.StdEncoding.DecodeString(sni); err == nil {
+			delete(proxy, "sni")
+		}
+	}
+
+	// 序列化回 YAML
+	fixed, err := yaml.Marshal(proxy)
+	if err != nil {
+		log.Warnf("fix proxy config failed: %v", err)
+		return raw
+	}
+
+	log.Debugf("fixed proxy config: %s -> %s", proxy["name"], host)
+	return fixed
+}
+
 func createFailureResult(msg string, startTime time.Time) subModel.Result {
 	return subModel.Result{
 		Success:  0,
