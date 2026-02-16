@@ -23,19 +23,22 @@ export function useCreateSub() {
 
     return useMutation({
         mutationFn: (data: SubRequest) => api.createSubscription(data),
+        retry: false, // 禁用重试，避免创建重复订阅
 
         onSuccess: (newSub) => {
+            // 直接更新缓存，不触发重新获取避免重复
             queryClient.setQueryData<SubResponse[]>(
                 subKeys.lists(),
-                (oldData) => oldData ? [...oldData, newSub] : [newSub]
+                (oldData) => {
+                    // 检查是否已存在相同 id 的订阅，避免重复添加
+                    if (oldData?.some(sub => sub.id === newSub.id)) {
+                        return oldData
+                    }
+                    return oldData ? [...oldData, newSub] : [newSub]
+                }
             )
 
             queryClient.setQueryData(subKeys.detail(newSub.id), newSub)
-
-            queryClient.invalidateQueries({
-                queryKey: subKeys.lists(),
-                refetchType: 'active'
-            })
         },
 
         onError: () => {

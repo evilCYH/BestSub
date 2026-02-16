@@ -3,6 +3,8 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/bestruirui/bestsub/internal/core/cron"
 	"github.com/bestruirui/bestsub/internal/core/node"
@@ -14,6 +16,38 @@ import (
 	"github.com/bestruirui/bestsub/internal/utils/log"
 	"github.com/gin-gonic/gin"
 )
+
+// 防重复提交锁（基于订阅名称）
+var (
+	creatingSubs   = make(map[string]time.Time)
+	creatingSubsMu sync.Mutex
+)
+
+// isDuplicateRequest 检查是否重复提交（5秒内相同名称视为重复）
+func isDuplicateRequest(name string) bool {
+	creatingSubsMu.Lock()
+	defer creatingSubsMu.Unlock()
+
+	if lastTime, exists := creatingSubs[name]; exists {
+		if time.Since(lastTime) < 5*time.Second {
+			return true
+		}
+	}
+	creatingSubs[name] = time.Now()
+	return false
+}
+
+// cleanupCreatingSubs 清理过期的创建记录
+func cleanupCreatingSubs() {
+	creatingSubsMu.Lock()
+	defer creatingSubsMu.Unlock()
+
+	for name, lastTime := range creatingSubs {
+		if time.Since(lastTime) > 10*time.Second {
+			delete(creatingSubs, name)
+		}
+	}
+}
 
 func init() {
 	router.NewGroupRouter("/api/v1/sub").
@@ -46,7 +80,7 @@ func init() {
 
 // createSub 创建订阅链接
 // @Summary 创建订阅链接
-// @Description 创建单个订阅链接
+// @Description 创建单个订阅链接，订阅获取将异步执行，立即返回
 // @Tags 订阅
 // @Accept json
 // @Produce json
@@ -58,25 +92,38 @@ func init() {
 // @Failure 500 {object} resp.ResponseStruct "服务器内部错误"
 // @Router /api/v1/sub [post]
 func createSub(c *gin.Context) {
+	cleanupCreatingSubs()
+
 	var req sub.Request
 	if err := c.ShouldBindJSON(&req); err != nil {
 		resp.ErrorBadRequest(c)
 		return
 	}
+
+	// 防重复提交检查
+	if isDuplicateRequest(req.Name) {
+		log.Warnf("duplicate sub creation request: %s", req.Name)
+		resp.Error(c, http.StatusTooManyRequests, "订阅正在创建中，请勿重复提交")
+		return
+	}
+
 	subData := req.GenData(0)
 	if err := op.CreateSub(c.Request.Context(), &subData); err != nil {
 		log.Errorf("failed to create sub: %v", err)
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	cron.FetchAdd(&subData)
+
+	// 异步执行订阅获取，避免阻塞响应
 	if subData.Enable {
-		result := cron.FetchRun(subData.ID)
-		respData := subData.GenResponse(cron.FetchStatus(subData.ID), node.GetSubInfo(subData.ID))
-		respData.Result = result
-		resp.Success(c, respData)
-		return
+		go func(subID uint16) {
+			cron.FetchRun(subID)
+		}(subData.ID)
 	}
+
+	// 立即返回，不等待获取完成
 	respData := subData.GenResponse(cron.FetchStatus(subData.ID), node.GetSubInfo(subData.ID))
 	resp.Success(c, respData)
 }

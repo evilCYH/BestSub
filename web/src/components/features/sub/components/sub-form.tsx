@@ -54,6 +54,9 @@ export function SubForm({
     }, [initialData, reset, defaultData, isOpen])
 
     const onSubmit = async (data: SubRequest) => {
+        // 防止重复提交
+        if (isSubmitting) return
+
         try {
             if (editingSubId) {
                 await updateSubMutation.mutateAsync({ id: editingSubId, data })
