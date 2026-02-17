@@ -40,19 +40,23 @@ type nodeMeta struct {
 // @Produce json
 // @Security BearerAuth
 // @Param sub_id query string false "订阅ID，支持逗号分隔"
+// @Param include_failed query bool false "是否包含初测失败节点"
 // @Success 200 {object} resp.ResponseStruct{data=[]node.Response} "获取成功"
 // @Failure 400 {object} resp.ResponseStruct "请求参数错误"
 // @Failure 401 {object} resp.ResponseStruct "未授权"
 // @Router /api/v1/node [get]
 func getNodes(c *gin.Context) {
 	subIDRaw := strings.TrimSpace(c.Query("sub_id"))
+	includeFailed := strings.TrimSpace(c.Query("include_failed"))
 	var nodes []nodeModel.Data
+	var subIDs []uint16
 	if subIDRaw != "" {
 		ids, err := parseSubIDs(subIDRaw)
 		if err != nil {
 			resp.ErrorBadRequest(c)
 			return
 		}
+		subIDs = ids
 		nodes = *node.GetBySubId(ids)
 	} else {
 		nodes = node.GetAll()
@@ -80,6 +84,28 @@ func getNodes(c *gin.Context) {
 			item.Country = n.Info.Country
 		}
 		respData = append(respData, item)
+	}
+
+	if includeFailed == "true" || includeFailed == "1" {
+		if len(subIDs) == 0 {
+			subIDs = node.GetSubIDsFromPool()
+		}
+		failedNodes := node.GetFailedBySubId(subIDs)
+		for _, fn := range failedNodes {
+			respData = append(respData, nodeModel.Response{
+				SubID:       fn.SubID,
+				UniqueKey:   fn.UniqueKey,
+				Name:        fn.Name,
+				Type:        fn.Type,
+				Reason:      fn.Reason,
+				Delay:       0,
+				SpeedUp:     0,
+				SpeedDown:   0,
+				Risk:        0,
+				AliveStatus: 0,
+				Country:     "",
+			})
+		}
 	}
 
 	resp.Success(c, respData)

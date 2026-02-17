@@ -23,6 +23,9 @@ var (
 	// 节点级详细日志存储
 	nodeTestLogMu    sync.RWMutex
 	nodeTestLogStore = make(map[uint16][]nodeModel.NodeTestLog)
+
+	failedNodeMu    sync.RWMutex
+	failedNodeStore = make(map[uint16][]nodeModel.FailedNode)
 )
 
 type infoSums struct {

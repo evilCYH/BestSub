@@ -121,7 +121,7 @@ func Do(ctx context.Context, subID uint16, config string) subModel.Result {
 
 		count := len(nodes)
 
-		node.Add(&nodes)
+		node.Add(subID, nodes)
 
 		log.Infof("fetch task %d completed, raw node count: %d, accepted: %d, duration: %dms",
 			subID, rawCount, count, uint16(time.Since(startTime).Milliseconds()))

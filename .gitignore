@@ -21,4 +21,6 @@ session/
 # misc
 config.json
 docs/feature/*
+docs/bug/*
+docs/evaluate/*
 docs/*.md

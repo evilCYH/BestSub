@@ -91,6 +91,13 @@ type nameNode struct {
 	Name string
 }
 
+func getNodeType(raw map[string]any) string {
+	if nodeType, ok := raw["type"].(string); ok && nodeType != "" {
+		return nodeType
+	}
+	return "unknown"
+}
+
 // getNodeName 从 raw 配置中获取节点名称
 func getNodeName(raw map[string]any) string {
 	if name, ok := raw["name"].(string); ok && name != "" {
@@ -150,6 +157,34 @@ func newAddStats(subID, rawCount uint16) *addStats {
 		start:    time.Now(),
 		rawCount: rawCount,
 	}
+}
+
+func (s *addStats) ResetFailedNodes(subID uint16) {
+	failedNodeMu.Lock()
+	delete(failedNodeStore, subID)
+	failedNodeMu.Unlock()
+}
+
+func (s *addStats) AddFailedNode(node nodeModel.FailedNode) {
+	if node.Name == "" {
+		node.Name = "unknown"
+	}
+	if node.Type == "" {
+		node.Type = "unknown"
+	}
+	failedNodeMu.Lock()
+	defer failedNodeMu.Unlock()
+
+	list := failedNodeStore[node.SubID]
+	if len(list) >= 500 {
+		return
+	}
+	for _, existing := range list {
+		if existing.UniqueKey == node.UniqueKey && existing.Reason == node.Reason {
+			return
+		}
+	}
+	failedNodeStore[node.SubID] = append(list, node)
 }
 
 func (s *addStats) IncCandidate() { atomic.AddUint32(&s.candidate, 1) }
@@ -245,20 +280,33 @@ func clampToUint16(value uint32) uint16 {
 	return uint16(value)
 }
 
-func Add(node *[]nodeModel.Base) int {
+func Add(subID uint16, nodes []nodeModel.Base) int {
 	var nodesToProcess []nodeModel.Base
-	var subID uint16
-	if len(*node) > 0 {
-		subID = (*node)[0].SubId
+	if len(nodes) == 0 {
+		return 0
 	}
-	stats := newAddStats(subID, uint16(len(*node)))
+	if subID == 0 {
+		subID = nodes[0].SubId
+	}
+	if subID == 0 {
+		return 0
+	}
+	stats := newAddStats(subID, uint16(len(nodes)))
+	stats.ResetFailedNodes(subID)
 
-	for _, n := range *node {
+	for _, n := range nodes {
 		var nameNode nameNode
 		if err := yaml.Unmarshal(n.Raw, &nameNode); err != nil {
 			log.Warnf("yaml.Unmarshal failed: %v", err)
 			stats.IncInvalid()
 			stats.AddDetail("yaml_unmarshal_failed")
+			stats.AddFailedNode(nodeModel.FailedNode{
+				SubID:     subID,
+				UniqueKey: n.UniqueKey,
+				Name:      "unknown",
+				Type:      "unknown",
+				Reason:    "yaml_unmarshal_failed",
+			})
 			continue
 		}
 		if !nodeExist.Exist(n.UniqueKey) && !nodeProcess.Exist(n.UniqueKey) {
@@ -269,6 +317,18 @@ func Add(node *[]nodeModel.Base) int {
 		} else {
 			log.Debugf("node already exist: %s", nameNode.Name)
 			stats.IncDuplicate()
+			var raw map[string]any
+			nodeType := "unknown"
+			if err := yaml.Unmarshal(n.Raw, &raw); err == nil {
+				nodeType = getNodeType(raw)
+			}
+			stats.AddFailedNode(nodeModel.FailedNode{
+				SubID:     subID,
+				UniqueKey: n.UniqueKey,
+				Name:      nameNode.Name,
+				Type:      nodeType,
+				Reason:    "duplicate",
+			})
 		}
 	}
 
@@ -290,6 +350,13 @@ func Add(node *[]nodeModel.Base) int {
 				log.Warnf("yaml.Unmarshal failed: %v", err)
 				stats.IncInvalid()
 				stats.AddDetail("yaml_unmarshal_failed")
+				stats.AddFailedNode(nodeModel.FailedNode{
+					SubID:     subID,
+					UniqueKey: n.UniqueKey,
+					Name:      "unknown",
+					Type:      "unknown",
+					Reason:    "yaml_unmarshal_failed",
+				})
 				return
 			}
 
@@ -304,6 +371,13 @@ func Add(node *[]nodeModel.Base) int {
 				stats.AddNodeLog("error", nodeName, "代理解析失败：配置无效或协议不支持")
 				stats.IncInvalid()
 				stats.AddDetail("proxy_parse_failed")
+				stats.AddFailedNode(nodeModel.FailedNode{
+					SubID:     subID,
+					UniqueKey: n.UniqueKey,
+					Name:      nodeName,
+					Type:      getNodeType(raw),
+					Reason:    "proxy_parse_failed",
+				})
 				return
 			}
 			defer client.Release()
@@ -330,6 +404,13 @@ func Add(node *[]nodeModel.Base) int {
 				stats.AddNodeLog("error", nodeName, "创建请求失败: "+err.Error())
 				stats.IncInvalid()
 				stats.AddDetail("request_create_failed")
+				stats.AddFailedNode(nodeModel.FailedNode{
+					SubID:     subID,
+					UniqueKey: n.UniqueKey,
+					Name:      nodeName,
+					Type:      getNodeType(raw),
+					Reason:    "request_create_failed",
+				})
 				return
 			}
 
@@ -350,6 +431,13 @@ func Add(node *[]nodeModel.Base) int {
 				stats.AddNodeLog(level, nodeName, errMsg)
 				stats.IncFailed()
 				stats.AddDetail("test_request_failed: " + err.Error())
+				stats.AddFailedNode(nodeModel.FailedNode{
+					SubID:     subID,
+					UniqueKey: n.UniqueKey,
+					Name:      nodeName,
+					Type:      getNodeType(raw),
+					Reason:    "test_request_failed",
+				})
 				return
 			}
 			defer response.Body.Close()
@@ -359,6 +447,13 @@ func Add(node *[]nodeModel.Base) int {
 				stats.AddNodeLog("warn", nodeName, msg)
 				stats.IncFailed()
 				stats.AddDetail("unexpected_status: " + response.Status)
+				stats.AddFailedNode(nodeModel.FailedNode{
+					SubID:     subID,
+					UniqueKey: n.UniqueKey,
+					Name:      nodeName,
+					Type:      getNodeType(raw),
+					Reason:    "unexpected_status",
+				})
 				return
 			}
 
@@ -445,6 +540,21 @@ func GetBySubIdExclude(subId []uint16) []uint16 {
 	return result
 }
 
+func GetSubIDsFromPool() []uint16 {
+	poolMutex.RLock()
+	defer poolMutex.RUnlock()
+	seen := make(map[uint16]struct{})
+	result := make([]uint16, 0)
+	for _, node := range pool {
+		if _, ok := seen[node.Base.SubId]; ok {
+			continue
+		}
+		seen[node.Base.SubId] = struct{}{}
+		result = append(result, node.Base.SubId)
+	}
+	return result
+}
+
 func GetBySubId(subId []uint16) *[]nodeModel.Data {
 	poolMutex.RLock()
 	defer poolMutex.RUnlock()
@@ -498,6 +608,18 @@ func GetByFilter(filter nodeModel.Filter) *[]nodeModel.Data {
 	return &result
 }
 
+func GetFailedBySubId(subId []uint16) []nodeModel.FailedNode {
+	result := make([]nodeModel.FailedNode, 0)
+	failedNodeMu.RLock()
+	defer failedNodeMu.RUnlock()
+	for _, id := range subId {
+		if list, ok := failedNodeStore[id]; ok {
+			result = append(result, list...)
+		}
+	}
+	return result
+}
+
 func copyNodeData(node nodeModel.Data) nodeModel.Data {
 	if node.Info == nil {
 		return node
@@ -539,17 +661,17 @@ func mergeNodesToPool(newNodes []nodeModel.Data) int {
 	if poolLen < poolCap {
 		remainingCap := poolCap - poolLen
 		if len(newNodes) < remainingCap {
-			pool = append(pool, newNodes...)
-			for _, node := range newNodes {
-				nodeExist.Add(node.Base.UniqueKey)
-			}
-			return len(newNodes)
+		pool = append(pool, newNodes...)
+		for _, node := range newNodes {
+			nodeExist.Add(node.Base.UniqueKey)
+		}
+		return len(newNodes)
 		} else {
-			pool = append(pool, newNodes[:remainingCap]...)
-			for _, node := range newNodes[:remainingCap] {
-				nodeExist.Add(node.Base.UniqueKey)
-			}
-			newNodes = newNodes[remainingCap:]
+		pool = append(pool, newNodes[:remainingCap]...)
+		for _, node := range newNodes[:remainingCap] {
+			nodeExist.Add(node.Base.UniqueKey)
+		}
+		newNodes = newNodes[remainingCap:]
 		}
 	}
 
@@ -560,14 +682,14 @@ func mergeNodesToPool(newNodes []nodeModel.Data) int {
 	newNodeIndex := 0
 	for i := len(pool) - 1; i >= 0 && newNodeIndex < len(newNodes); i-- {
 		if newNodes[newNodeIndex].Info.Delay.Average() < pool[i].Info.Delay.Average() {
-			log.Debugf("new node delay %dms < old delay %dms,merge", newNodes[newNodeIndex].Info.Delay.Average(), pool[i].Info.Delay.Average())
-			nodeExist.Remove(pool[i].Base.UniqueKey)
-			pool[i] = newNodes[newNodeIndex]
-			nodeExist.Add(newNodes[newNodeIndex].Base.UniqueKey)
-			newNodeIndex++
+		log.Debugf("new node delay %dms < old delay %dms,merge", newNodes[newNodeIndex].Info.Delay.Average(), pool[i].Info.Delay.Average())
+		nodeExist.Remove(pool[i].Base.UniqueKey)
+		pool[i] = newNodes[newNodeIndex]
+		nodeExist.Add(newNodes[newNodeIndex].Base.UniqueKey)
+		newNodeIndex++
 		} else {
-			log.Debugf("new node delay %dms > old delay %dms,not merge", newNodes[newNodeIndex].Info.Delay.Average(), pool[i].Info.Delay.Average())
-			return newNodeIndex
+		log.Debugf("new node delay %dms > old delay %dms,not merge", newNodes[newNodeIndex].Info.Delay.Average(), pool[i].Info.Delay.Average())
+		return newNodeIndex
 		}
 	}
 	return 0
@@ -591,11 +713,11 @@ func DeleteBySubId(subID uint16) {
 	end := len(pool) - 1
 	for i := 0; i <= end; {
 		if pool[i].Base.SubId == subID {
-			nodeExist.Remove(pool[i].Base.UniqueKey)
-			pool[i] = pool[end]
-			end--
+		nodeExist.Remove(pool[i].Base.UniqueKey)
+		pool[i] = pool[end]
+		end--
 		} else {
-			i++
+		i++
 		}
 	}
 
@@ -630,15 +752,15 @@ func QueryNodeLogs(query nodeModel.NodeTestLogQuery) ([]nodeModel.NodeTestLog, i
 	for _, log := range logs {
 		// 级别筛选
 		if query.Level != "" && log.Level != query.Level {
-			continue
+		continue
 		}
 
 		// 关键词搜索（节点名或日志内容）
 		if query.Keyword != "" {
-			keyword := query.Keyword
-			if !strings.Contains(log.NodeName, keyword) && !strings.Contains(log.Message, keyword) {
-				continue
-			}
+		keyword := query.Keyword
+		if !strings.Contains(log.NodeName, keyword) && !strings.Contains(log.Message, keyword) {
+			continue
+		}
 		}
 
 		filtered = append(filtered, log)

@@ -3,6 +3,7 @@ export interface NodeResponse {
     unique_key: number
     name: string
     type: string
+    reason?: string
     delay: number
     speed_up: number
     speed_down: number

@@ -30,7 +30,6 @@ func FetchLoad() {
 }
 
 func FetchAdd(data *subModel.Data) error {
-	// 复制关键字段，确保任务使用创建时快照
 	subID := data.ID
 	cronExpr := data.CronExpr
 	config := data.Config

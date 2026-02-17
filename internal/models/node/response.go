@@ -5,6 +5,7 @@ type Response struct {
 	UniqueKey   uint64 `json:"unique_key"`
 	Name        string `json:"name"`
 	Type        string `json:"type"`
+	Reason      string `json:"reason,omitempty"`
 	Delay       uint16 `json:"delay"`
 	SpeedUp     uint32 `json:"speed_up"`
 	SpeedDown   uint32 `json:"speed_down"`
@@ -12,4 +13,3 @@ type Response struct {
 	AliveStatus uint64 `json:"alive_status"`
 	Country     string `json:"country"`
 }
-

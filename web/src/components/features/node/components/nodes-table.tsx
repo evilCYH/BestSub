@@ -4,6 +4,7 @@ import { Table, TableBody, TableHead, TableHeader, TableRow, TableCell } from "@
 import { InlineLoading } from "@/src/components/ui/loading"
 import { formatSpeed } from "@/src/components/features/sub/utils"
 import { formatNodeStatus, getRiskClass, getRiskLabel } from "../utils"
+import { NODE_STATUS } from "../constants"
 import type { NodeResponse } from "@/src/types"
 
 interface NodesTableProps {
@@ -47,6 +48,13 @@ export function NodesTable({ nodes, isLoading, error }: NodesTableProps) {
         )
     }
 
+    const orderedNodes = nodes.slice().sort((a, b) => {
+        const aAlive = (a.alive_status & NODE_STATUS.ALIVE) !== 0
+        const bAlive = (b.alive_status & NODE_STATUS.ALIVE) !== 0
+        if (aAlive === bAlive) return 0
+        return aAlive ? -1 : 1
+    })
+
     return (
         <Card className="min-w-0">
             <CardContent>
@@ -63,17 +71,20 @@ export function NodesTable({ nodes, isLoading, error }: NodesTableProps) {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {nodes.map((node) => {
+                        {orderedNodes.map((node) => {
                             const statusLabels = formatNodeStatus(node.alive_status)
                             return (
-                                <TableRow key={`${node.sub_id}-${node.unique_key}`}>
-                                    <TableCell className="font-medium">
-                                        {node.name || '未命名节点'}
-                                    </TableCell>
+                            <TableRow key={`${node.sub_id}-${node.unique_key}`}>
+                                <TableCell className="font-medium">
+                                    {node.name || '未命名节点'}
+                                    {node.reason ? (
+                                        <div className="text-xs text-muted-foreground">原因: {node.reason}</div>
+                                    ) : null}
+                                </TableCell>
                                     <TableCell>{node.type || 'N/A'}</TableCell>
                                     <TableCell className="space-x-1">
                                         {statusLabels.length === 0 ? (
-                                            <Badge variant="outline">未知</Badge>
+                                            <Badge variant="outline">非存活</Badge>
                                         ) : (
                                             statusLabels.map((label) => (
                                                 <Badge key={label} variant="outline">{label}</Badge>
