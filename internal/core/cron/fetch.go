@@ -151,7 +151,10 @@ func FetchUpdate(data *subModel.Data) error {
 	FetchAdd(data)
 	return nil
 }
-func FetchStatus(subID uint16) string {
+func FetchStatus(subID uint16, enable bool) string {
+	if !enable {
+		return DisabledStatus
+	}
 	if _, ok := fetchRunning.Load(subID); ok {
 		return RunningStatus
 	}

@@ -124,7 +124,7 @@ func createSub(c *gin.Context) {
 	}
 
 	// 立即返回，不等待获取完成
-	respData := subData.GenResponse(cron.FetchStatus(subData.ID), node.GetSubInfo(subData.ID))
+	respData := subData.GenResponse(cron.FetchStatus(subData.ID, subData.Enable), node.GetSubInfo(subData.ID))
 	resp.Success(c, respData)
 }
 
@@ -150,7 +150,7 @@ func getSubs(c *gin.Context) {
 		}
 		var respSubList = make([]sub.Response, len(subList))
 		for i := range subList {
-			respSubList[i] = subList[i].GenResponse(cron.FetchStatus(subList[i].ID), node.GetSubInfo(subList[i].ID))
+			respSubList[i] = subList[i].GenResponse(cron.FetchStatus(subList[i].ID, subList[i].Enable), node.GetSubInfo(subList[i].ID))
 		}
 		resp.Success(c, respSubList)
 	} else {
@@ -165,7 +165,7 @@ func getSubs(c *gin.Context) {
 			return
 		}
 		var respSub = [1]sub.Response{}
-		respSub[0] = subData.GenResponse(cron.FetchStatus(subData.ID), node.GetSubInfo(subData.ID))
+		respSub[0] = subData.GenResponse(cron.FetchStatus(subData.ID, subData.Enable), node.GetSubInfo(subData.ID))
 		resp.Success(c, respSub)
 	}
 }
@@ -208,7 +208,7 @@ func updateSub(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	respData := subData.GenResponse(cron.FetchStatus(subData.ID), node.GetSubInfo(subData.ID))
+	respData := subData.GenResponse(cron.FetchStatus(subData.ID, subData.Enable), node.GetSubInfo(subData.ID))
 	resp.Success(c, respData)
 }
 
@@ -312,7 +312,7 @@ func batchCreateSub(c *gin.Context) {
 
 	respData := make([]sub.Response, len(subs))
 	for i, subData := range subs {
-		respData[i] = subData.GenResponse(cron.FetchStatus(subData.ID), node.GetSubInfo(subData.ID))
+		respData[i] = subData.GenResponse(cron.FetchStatus(subData.ID, subData.Enable), node.GetSubInfo(subData.ID))
 	}
 	resp.Success(c, respData)
 }

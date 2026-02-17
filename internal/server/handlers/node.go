@@ -91,7 +91,17 @@ func getNodes(c *gin.Context) {
 			subIDs = node.GetSubIDsFromPool()
 		}
 		failedNodes := node.GetFailedBySubId(subIDs)
+		// 获取池中的节点唯一键集合，用于去重
+		poolNodes := node.GetAll()
+		poolKeys := make(map[uint64]struct{})
+		for _, n := range poolNodes {
+			poolKeys[n.Base.UniqueKey] = struct{}{}
+		}
 		for _, fn := range failedNodes {
+			// 跳过已存在于池中的节点（这些节点应该显示为存活）
+			if _, exists := poolKeys[fn.UniqueKey]; exists {
+				continue
+			}
 			respData = append(respData, nodeModel.Response{
 				SubID:       fn.SubID,
 				UniqueKey:   fn.UniqueKey,

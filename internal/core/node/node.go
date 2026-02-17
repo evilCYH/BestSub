@@ -309,27 +309,21 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 			})
 			continue
 		}
-		if !nodeExist.Exist(n.UniqueKey) && !nodeProcess.Exist(n.UniqueKey) {
-			nodeProcess.Add(n.UniqueKey)
-			stats.IncCandidate()
-			nodesToProcess = append(nodesToProcess, n)
-			log.Debugf("add process node: %s", nameNode.Name)
-		} else {
-			log.Debugf("node already exist: %s", nameNode.Name)
-			stats.IncDuplicate()
-			var raw map[string]any
-			nodeType := "unknown"
-			if err := yaml.Unmarshal(n.Raw, &raw); err == nil {
-				nodeType = getNodeType(raw)
-			}
-			stats.AddFailedNode(nodeModel.FailedNode{
-				SubID:     subID,
-				UniqueKey: n.UniqueKey,
-				Name:      nameNode.Name,
-				Type:      nodeType,
-				Reason:    "duplicate",
-			})
+		// 检查节点是否正在处理中（避免并发重复处理）
+		if nodeProcess.Exist(n.UniqueKey) {
+			log.Debugf("node already in process: %s", nameNode.Name)
+			continue
 		}
+		// 检查节点是否已存在于池中
+		if nodeExist.Exist(n.UniqueKey) {
+			// 节点已存在，需要重新测试以更新状态
+			log.Debugf("node exist in pool, will update: %s", nameNode.Name)
+		} else {
+			log.Debugf("add process node: %s", nameNode.Name)
+		}
+		nodeProcess.Add(n.UniqueKey)
+		stats.IncCandidate()
+		nodesToProcess = append(nodesToProcess, n)
 	}
 
 	log.Debugf("add %d nodes to process", len(nodesToProcess))
@@ -431,6 +425,11 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 				stats.AddNodeLog(level, nodeName, errMsg)
 				stats.IncFailed()
 				stats.AddDetail("test_request_failed: " + err.Error())
+				// 如果节点已存在于池中，移除它
+				if nodeExist.Exist(n.UniqueKey) {
+					UpdateNodeInPool(n.UniqueKey, nil)
+					log.Debugf("remove failed node from pool: %s", nodeName)
+				}
 				stats.AddFailedNode(nodeModel.FailedNode{
 					SubID:     subID,
 					UniqueKey: n.UniqueKey,
@@ -447,6 +446,11 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 				stats.AddNodeLog("warn", nodeName, msg)
 				stats.IncFailed()
 				stats.AddDetail("unexpected_status: " + response.Status)
+				// 如果节点已存在于池中，移除它
+				if nodeExist.Exist(n.UniqueKey) {
+					UpdateNodeInPool(n.UniqueKey, nil)
+					log.Debugf("remove failed node from pool: %s", nodeName)
+				}
 				stats.AddFailedNode(nodeModel.FailedNode{
 					SubID:     subID,
 					UniqueKey: n.UniqueKey,
@@ -474,10 +478,19 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 			info.SetAliveStatus(nodeModel.Alive, true)
 			rawCopy := append([]byte(nil), n.Raw...)
 			n.Raw = rawCopy
-			stats.AddValid(nodeModel.Data{
-				Base: n,
-				Info: &info,
-			})
+
+			// 检查节点是否已存在于池中
+			if nodeExist.Exist(n.UniqueKey) {
+				// 更新池中节点状态
+				UpdateNodeInPool(n.UniqueKey, &info)
+				log.Debugf("update existing node in pool: %s", nodeName)
+			} else {
+				// 新节点，添加到候选列表
+				stats.AddValid(nodeModel.Data{
+					Base: n,
+					Info: &info,
+				})
+			}
 			if rawName, ok := raw["name"].(string); ok {
 				log.Debugf("node: %s test end, Delay: %d", rawName, info.Delay.Average())
 			}
@@ -645,6 +658,29 @@ func cloneQueue[T generic.Integer](q generic.Queue[T]) generic.Queue[T] {
 		Ptr:  q.Ptr,
 		Full: q.Full,
 	}
+}
+
+// UpdateNodeInPool 更新池中节点的状态
+// 如果节点存在，更新其 Info；如果不存在，返回 false
+// 如果测试失败（info 为 nil），从池中移除节点
+func UpdateNodeInPool(uniqueKey uint64, info *nodeModel.Info) bool {
+	poolMutex.Lock()
+	defer poolMutex.Unlock()
+
+	for i := range pool {
+		if pool[i].Base.UniqueKey == uniqueKey {
+			if info == nil {
+				// 测试失败，从池中移除
+				nodeExist.Remove(uniqueKey)
+				pool = append(pool[:i], pool[i+1:]...)
+				return true
+			}
+			// 更新节点信息
+			pool[i].Info = info
+			return true
+		}
+	}
+	return false
 }
 
 func mergeNodesToPool(newNodes []nodeModel.Data) int {
