@@ -24,36 +24,46 @@ func FetchLoad() {
 		log.Errorf("failed to load sub data: %v", err)
 		return
 	}
-	for _, data := range subData {
-		FetchAdd(&data)
+	for i := range subData {
+		FetchAdd(&subData[i])
 	}
 }
 
 func FetchAdd(data *subModel.Data) error {
-	fetchFunc.Store(data.ID, cronFunc{
+	// 复制关键字段，确保任务使用创建时快照
+	subID := data.ID
+	cronExpr := data.CronExpr
+	config := data.Config
+	enable := data.Enable
+
+	fetchFunc.Store(subID, cronFunc{
 		fn: func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			fetchRunning.Store(data.ID, cancel)
+			fetchCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			fetchRunning.Store(subID, cancel)
 			defer func() {
 				cancel()
-				fetchRunning.Delete(data.ID)
+				fetchRunning.Delete(subID)
 			}()
-			result := fetch.Do(ctx, data.ID, data.Config)
-			op.UpdateSubResult(ctx, data.ID, result)
-			sub, err := op.GetSubByID(ctx, data.ID)
+			result := fetch.Do(fetchCtx, subID, config)
+			updateCtx, updateCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			if err := op.UpdateSubResult(updateCtx, subID, result); err != nil {
+				log.Warnf("failed to update sub result: %v", err)
+			}
+			updateCancel()
+			sub, err := op.GetSubByID(context.Background(), subID)
 			if err != nil {
 				log.Warnf("failed to get sub by id: %v", err)
 				return
 			}
 			if !sub.Enable {
-				FetchDisable(data.ID)
-				log.Infof("fetch task %d auto disable", data.ID)
+				FetchDisable(subID)
+				log.Infof("fetch task %d auto disable", subID)
 			}
 		},
-		cronExpr: data.CronExpr,
+		cronExpr: cronExpr,
 	})
-	if data.Enable {
-		FetchEnable(data.ID)
+	if enable {
+		FetchEnable(subID)
 	}
 	return nil
 }

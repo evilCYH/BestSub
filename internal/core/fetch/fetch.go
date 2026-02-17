@@ -75,6 +75,7 @@ func Do(ctx context.Context, subID uint16, config string) subModel.Result {
 		var unique nodeModel.UniqueKey
 		lines := bytes.Split(content, []byte("\n"))
 		lines = lines[1:]
+		rawCount := 0
 		for _, line := range lines {
 			if len(line) == 0 {
 				continue
@@ -83,6 +84,7 @@ func Do(ctx context.Context, subID uint16, config string) subModel.Result {
 			if err := yaml.Unmarshal(line, &unique); err != nil {
 				continue
 			}
+			rawCount++
 			if subConfig.ProtocolFilterEnable {
 				if subConfig.ProtocolFilterMode {
 					if !slices.Contains(subConfig.ProtocolFilter, unique.Type) {
@@ -121,10 +123,10 @@ func Do(ctx context.Context, subID uint16, config string) subModel.Result {
 
 		node.Add(&nodes)
 
-		log.Infof("fetch task %d completed, raw node count: %d,  duration: %dms",
-			subID, count, uint16(time.Since(startTime).Milliseconds()))
+		log.Infof("fetch task %d completed, raw node count: %d, accepted: %d, duration: %dms",
+			subID, rawCount, count, uint16(time.Since(startTime).Milliseconds()))
 
-		return createSuccessResult(uint32(count), startTime, count == 0)
+		return createSuccessResult(uint32(rawCount), startTime, count == 0)
 	}
 	return createFailureResult("fetch task failed", startTime)
 }
