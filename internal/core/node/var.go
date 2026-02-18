@@ -26,6 +26,8 @@ var (
 
 	failedNodeMu    sync.RWMutex
 	failedNodeStore = make(map[uint16][]nodeModel.FailedNode)
+
+	registry = newRegistryStore()
 )
 
 type infoSums struct {

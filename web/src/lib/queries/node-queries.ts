@@ -7,10 +7,17 @@ const nodeKeys = {
     listBySub: (subId: number | null) => [...nodeKeys.lists(), { subId }] as const,
 }
 
-export function useNodes(subId: number | null, includeFailed = false) {
+export function useNodes(
+    subId: number | null,
+    options?: {
+        includeFailed?: boolean
+        scope?: 'registry' | 'pool'
+        status?: 'alive' | 'dead' | 'init_failed' | 'all'
+    }
+) {
     return useQuery({
-        queryKey: [...nodeKeys.listBySub(subId), { includeFailed }],
-        queryFn: () => api.getNodes(subId ?? undefined, includeFailed),
+        queryKey: [...nodeKeys.listBySub(subId), options ?? {}],
+        queryFn: () => api.getNodes({ subId: subId ?? undefined, ...options }),
         enabled: subId !== null,
         refetchInterval: 60 * 1000,
         notifyOnChangeProps: ['data', 'error', 'isLoading'],

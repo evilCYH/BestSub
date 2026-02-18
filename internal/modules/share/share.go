@@ -12,6 +12,7 @@ import (
 	"github.com/bestruirui/bestsub/internal/core/subconv"
 	"github.com/bestruirui/bestsub/internal/database/op"
 	"github.com/bestruirui/bestsub/internal/models/share"
+	nodeModel "github.com/bestruirui/bestsub/internal/models/node"
 	"github.com/bestruirui/bestsub/internal/utils"
 	"github.com/bestruirui/bestsub/internal/utils/country"
 )
@@ -20,6 +21,9 @@ func GenSubData(genConfigStr string) []byte {
 	var genConfig share.GenConfig
 	if err := json.Unmarshal([]byte(genConfigStr), &genConfig); err != nil {
 		return nil
+	}
+	if genConfig.Filter.AliveStatus == 0 {
+		genConfig.Filter.AliveStatus = nodeModel.Alive
 	}
 	nodes := node.GetByFilter(genConfig.Filter)
 	var result bytes.Buffer
@@ -57,6 +61,9 @@ func GenNodeData(config string) []byte {
 	var genConfig share.GenConfig
 	if err := json.Unmarshal([]byte(config), &genConfig); err != nil {
 		return nil
+	}
+	if genConfig.Filter.AliveStatus == 0 {
+		genConfig.Filter.AliveStatus = nodeModel.Alive
 	}
 	nodes := node.GetByFilter(genConfig.Filter)
 	var result bytes.Buffer

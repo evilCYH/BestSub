@@ -63,11 +63,14 @@ func (e *TikTok) Run(ctx context.Context, log *log.Logger, subID []uint16) check
 		sem <- struct{}{}
 		wg.Add(1)
 		n := nd
-		task.Submit(func() {
-			defer func() {
-				<-sem
-				wg.Done()
-			}()
+			task.Submit(func() {
+				defer func() {
+					<-sem
+					wg.Done()
+				}()
+				if n.Info == nil {
+					return
+				}
 
 			var raw map[string]any
 			if err := yaml.Unmarshal(n.Raw, &raw); err != nil {
@@ -84,6 +87,7 @@ func (e *TikTok) Run(ctx context.Context, log *log.Logger, subID []uint16) check
 				n.Info.SetAliveStatus(nodeModel.TikTok, false)
 				n.Info.SetAliveStatus(nodeModel.TikTokIDC, false)
 			}
+			node.UpdateRegistryTikTok(n.Base.SubId, n.Base.UniqueKey, n.Info.AliveStatus, "tiktok_task")
 		})
 	}
 	wg.Wait()

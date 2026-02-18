@@ -28,3 +28,12 @@ func (k *exist) Remove(key uint64) {
 	delete(k.data, key)
 	k.mu.Unlock()
 }
+
+func (k *exist) Reset(keys []uint64) {
+	k.mu.Lock()
+	k.data = make(map[uint64]struct{}, len(keys))
+	for _, key := range keys {
+		k.data[key] = struct{}{}
+	}
+	k.mu.Unlock()
+}

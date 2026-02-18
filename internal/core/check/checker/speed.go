@@ -77,11 +77,14 @@ func (e *Speed) Run(ctx context.Context, log *log.Logger, subID []uint16) checkM
 		sem <- struct{}{}
 		wg.Add(1)
 		n := nd
-		task.Submit(func() {
-			defer func() {
-				<-sem
-				wg.Done()
-			}()
+			task.Submit(func() {
+				defer func() {
+					<-sem
+					wg.Done()
+				}()
+				if n.Info == nil {
+					return
+				}
 			var raw map[string]any
 			if err := yaml.Unmarshal(n.Raw, &raw); err != nil {
 				log.Warnf("yaml.Unmarshal failed: %v", err)
@@ -98,6 +101,7 @@ func (e *Speed) Run(ctx context.Context, log *log.Logger, subID []uint16) checkM
 				if speed > 0 {
 					n.Info.SpeedDown.Update(uint32(speed))
 					log.Debugf("node %s download speed: %d", raw["name"], speed)
+					node.UpdateRegistrySpeed(n.Base.SubId, n.Base.UniqueKey, 0, uint32(speed), "speed_task")
 				}
 				if speed > e.DownloadSpeed {
 					downloadCount++
@@ -109,6 +113,7 @@ func (e *Speed) Run(ctx context.Context, log *log.Logger, subID []uint16) checkM
 				if speed > 0 {
 					n.Info.SpeedUp.Update(uint32(speed))
 					log.Debugf("node %s upload speed: %d", raw["name"], speed)
+					node.UpdateRegistrySpeed(n.Base.SubId, n.Base.UniqueKey, uint32(speed), 0, "speed_task")
 				}
 				if speed > e.UploadSpeed {
 					uploadCount++

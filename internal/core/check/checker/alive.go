@@ -68,11 +68,14 @@ func (e *Alive) Run(ctx context.Context, log *log.Logger, subID []uint16) checkM
 		sem <- struct{}{}
 		wg.Add(1)
 		n := nd
-		task.Submit(func() {
-			defer func() {
-				<-sem
-				wg.Done()
-			}()
+			task.Submit(func() {
+				defer func() {
+					<-sem
+					wg.Done()
+				}()
+				if n.Info == nil {
+					return
+				}
 			var raw map[string]any
 			if err := yaml.Unmarshal(n.Raw, &raw); err != nil {
 				log.Warnf("yaml.Unmarshal failed: %v", err)
@@ -86,11 +89,13 @@ func (e *Alive) Run(ctx context.Context, log *log.Logger, subID []uint16) checkM
 				n.Info.Delay.Update(delay)
 				log.Debugf("Node %s delay: %dms", raw["name"].(string), n.Info.Delay.Average())
 				atomic.AddInt64(&totalDelay, int64(n.Info.Delay.Average()))
+				node.UpdateRegistryAlive(n.Base.SubId, n.Base.UniqueKey, true, delay, "alive_task")
 			} else {
 				log.Debugf("Node %s is dead ✘", raw["name"].(string))
 				atomic.AddInt64(&deadCount, 1)
 				n.Info.SetAliveStatus(nodeModel.Alive, false)
 				// 失败时不更新延迟，保持上一次成功的延迟值
+				node.UpdateRegistryAlive(n.Base.SubId, n.Base.UniqueKey, false, 0, "alive_task")
 			}
 
 		})

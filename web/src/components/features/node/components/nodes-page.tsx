@@ -17,7 +17,11 @@ export function NodesPage() {
         return subs.filter((sub) => sub.name.toLowerCase().includes(keyword))
     }, [query, subs])
 
-    const { data: nodes = [], isLoading: nodesLoading, error: nodesError } = useNodes(selectedSub?.id ?? null, true)
+    const { data: nodes = [], isLoading: nodesLoading, error: nodesError } = useNodes(selectedSub?.id ?? null, {
+        scope: 'registry',
+        status: 'all',
+        includeFailed: false,
+    })
 
     return (
         <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">

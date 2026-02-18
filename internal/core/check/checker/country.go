@@ -60,11 +60,14 @@ func (e *Country) Run(ctx context.Context, log *log.Logger, subID []uint16) chec
 		sem <- struct{}{}
 		wg.Add(1)
 		n := nd
-		task.Submit(func() {
-			defer func() {
-				<-sem
-				wg.Done()
-			}()
+			task.Submit(func() {
+				defer func() {
+					<-sem
+					wg.Done()
+				}()
+				if n.Info == nil {
+					return
+				}
 			var raw map[string]any
 			if err := yaml.Unmarshal(n.Raw, &raw); err != nil {
 				log.Warnf("yaml.Unmarshal failed: %v", err)
@@ -76,15 +79,16 @@ func (e *Country) Run(ctx context.Context, log *log.Logger, subID []uint16) chec
 			}
 			client.Timeout = time.Duration(e.Timeout) * time.Second
 			defer client.Release()
-			countryCode := country.GetCode(ctx, client.Client)
-			if countryCode != "" {
-				n.Info.Country = countryCode
-				n.Info.SetAliveStatus(nodeModel.Country, true)
-			} else {
-				n.Info.SetAliveStatus(nodeModel.Country, false)
-			}
-		})
-	}
+				countryCode := country.GetCode(ctx, client.Client)
+				if countryCode != "" {
+					n.Info.Country = countryCode
+					n.Info.SetAliveStatus(nodeModel.Country, true)
+				} else {
+					n.Info.SetAliveStatus(nodeModel.Country, false)
+				}
+				node.UpdateRegistryCountry(n.Base.SubId, n.Base.UniqueKey, n.Info.Country, countryCode != "", "country_task")
+			})
+		}
 	wg.Wait()
 	return checkModel.Result{
 		Msg:      "success",

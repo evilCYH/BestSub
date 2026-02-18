@@ -51,6 +51,11 @@ func InitNodePool(size int) {
 	}
 	for i := range pool {
 		nodeExist.Add(pool[i].Base.UniqueKey)
+		registry.Upsert(nodeModel.Record{
+			Base:       pool[i].Base,
+			Info:       pool[i].Info,
+			InitStatus: nodeModel.InitPassed,
+		})
 		// 确保 Queue 正确初始化
 		if pool[i].Info != nil {
 			if pool[i].Info.Delay.Data == nil {
@@ -232,6 +237,7 @@ func (s *addStats) Finalize() {
 	merged := 0
 	if len(s.validNodes) > 0 {
 		merged = mergeNodesToPool(s.validNodes)
+		RebuildPoolFromRegistry(op.GetSettingInt(setting.NODE_POOL_SIZE))
 		RefreshInfo()
 	}
 	log.Infof("Receipt successful, %d new nodes added", merged)
@@ -295,11 +301,20 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 	stats.ResetFailedNodes(subID)
 
 	for _, n := range nodes {
+		// 注册节点到主表（Registry）
+		rawCopy := append([]byte(nil), n.Raw...)
+		n.Raw = rawCopy
+		registry.Upsert(nodeModel.Record{
+			Base:       n,
+			Info:       nil,
+			InitStatus: nodeModel.InitUnknown,
+		})
 		var nameNode nameNode
 		if err := yaml.Unmarshal(n.Raw, &nameNode); err != nil {
 			log.Warnf("yaml.Unmarshal failed: %v", err)
 			stats.IncInvalid()
 			stats.AddDetail("yaml_unmarshal_failed")
+			UpdateRegistryInitStatus(subID, n.UniqueKey, nodeModel.InitFailed, "yaml_unmarshal_failed")
 			stats.AddFailedNode(nodeModel.FailedNode{
 				SubID:     subID,
 				UniqueKey: n.UniqueKey,
@@ -309,18 +324,19 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 			})
 			continue
 		}
+
 		// 检查节点是否正在处理中（避免并发重复处理）
 		if nodeProcess.Exist(n.UniqueKey) {
 			log.Debugf("node already in process: %s", nameNode.Name)
 			continue
 		}
-		// 检查节点是否已存在于池中
+		// 检查节点是否已存在于池中（入库初测只处理新节点）
 		if nodeExist.Exist(n.UniqueKey) {
-			// 节点已存在，需要重新测试以更新状态
-			log.Debugf("node exist in pool, will update: %s", nameNode.Name)
-		} else {
-			log.Debugf("add process node: %s", nameNode.Name)
+			log.Debugf("node already exist: %s", nameNode.Name)
+			stats.IncDuplicate()
+			continue
 		}
+		log.Debugf("add process node: %s", nameNode.Name)
 		nodeProcess.Add(n.UniqueKey)
 		stats.IncCandidate()
 		nodesToProcess = append(nodesToProcess, n)
@@ -344,6 +360,7 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 				log.Warnf("yaml.Unmarshal failed: %v", err)
 				stats.IncInvalid()
 				stats.AddDetail("yaml_unmarshal_failed")
+				UpdateRegistryInitStatus(subID, n.UniqueKey, nodeModel.InitFailed, "yaml_unmarshal_failed")
 				stats.AddFailedNode(nodeModel.FailedNode{
 					SubID:     subID,
 					UniqueKey: n.UniqueKey,
@@ -365,6 +382,7 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 				stats.AddNodeLog("error", nodeName, "代理解析失败：配置无效或协议不支持")
 				stats.IncInvalid()
 				stats.AddDetail("proxy_parse_failed")
+				UpdateRegistryInitStatus(subID, n.UniqueKey, nodeModel.InitFailed, "proxy_parse_failed")
 				stats.AddFailedNode(nodeModel.FailedNode{
 					SubID:     subID,
 					UniqueKey: n.UniqueKey,
@@ -398,6 +416,7 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 				stats.AddNodeLog("error", nodeName, "创建请求失败: "+err.Error())
 				stats.IncInvalid()
 				stats.AddDetail("request_create_failed")
+				UpdateRegistryInitStatus(subID, n.UniqueKey, nodeModel.InitFailed, "request_create_failed")
 				stats.AddFailedNode(nodeModel.FailedNode{
 					SubID:     subID,
 					UniqueKey: n.UniqueKey,
@@ -425,11 +444,7 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 				stats.AddNodeLog(level, nodeName, errMsg)
 				stats.IncFailed()
 				stats.AddDetail("test_request_failed: " + err.Error())
-				// 如果节点已存在于池中，移除它
-				if nodeExist.Exist(n.UniqueKey) {
-					UpdateNodeInPool(n.UniqueKey, nil)
-					log.Debugf("remove failed node from pool: %s", nodeName)
-				}
+				UpdateRegistryInitStatus(subID, n.UniqueKey, nodeModel.InitFailed, "test_request_failed")
 				stats.AddFailedNode(nodeModel.FailedNode{
 					SubID:     subID,
 					UniqueKey: n.UniqueKey,
@@ -446,11 +461,7 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 				stats.AddNodeLog("warn", nodeName, msg)
 				stats.IncFailed()
 				stats.AddDetail("unexpected_status: " + response.Status)
-				// 如果节点已存在于池中，移除它
-				if nodeExist.Exist(n.UniqueKey) {
-					UpdateNodeInPool(n.UniqueKey, nil)
-					log.Debugf("remove failed node from pool: %s", nodeName)
-				}
+				UpdateRegistryInitStatus(subID, n.UniqueKey, nodeModel.InitFailed, "unexpected_status")
 				stats.AddFailedNode(nodeModel.FailedNode{
 					SubID:     subID,
 					UniqueKey: n.UniqueKey,
@@ -478,19 +489,19 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 			info.SetAliveStatus(nodeModel.Alive, true)
 			rawCopy := append([]byte(nil), n.Raw...)
 			n.Raw = rawCopy
+			registry.Upsert(nodeModel.Record{
+				Base:            n,
+				Info:            &info,
+				InitStatus:      nodeModel.InitPassed,
+				LastCheckAt:     time.Now(),
+				LastCheckSource: "initial",
+			})
 
-			// 检查节点是否已存在于池中
-			if nodeExist.Exist(n.UniqueKey) {
-				// 更新池中节点状态
-				UpdateNodeInPool(n.UniqueKey, &info)
-				log.Debugf("update existing node in pool: %s", nodeName)
-			} else {
-				// 新节点，添加到候选列表
-				stats.AddValid(nodeModel.Data{
-					Base: n,
-					Info: &info,
-				})
-			}
+			// 新节点，添加到候选列表
+			stats.AddValid(nodeModel.Data{
+				Base: n,
+				Info: &info,
+			})
 			if rawName, ok := raw["name"].(string); ok {
 				log.Debugf("node: %s test end, Delay: %d", rawName, info.Delay.Average())
 			}
@@ -541,6 +552,10 @@ func GetAll() []nodeModel.Data {
 	return result
 }
 
+func GetRegistryAll() []nodeModel.Record {
+	return registry.GetAll()
+}
+
 func GetBySubIdExclude(subId []uint16) []uint16 {
 	poolMutex.RLock()
 	defer poolMutex.RUnlock()
@@ -578,6 +593,10 @@ func GetBySubId(subId []uint16) *[]nodeModel.Data {
 		}
 	}
 	return &result
+}
+
+func GetRegistryBySubId(subId []uint16) []nodeModel.Record {
+	return registry.GetBySubIDs(subId)
 }
 
 func GetByFilter(filter nodeModel.Filter) *[]nodeModel.Data {
@@ -619,6 +638,59 @@ func GetByFilter(filter nodeModel.Filter) *[]nodeModel.Data {
 		result = append(result, copyNodeData(node))
 	}
 	return &result
+}
+
+func GetRegistryByFilter(filter nodeModel.Filter) []nodeModel.Record {
+	items := registry.GetAll()
+	result := make([]nodeModel.Record, 0, len(items))
+	for _, item := range items {
+		if len(filter.SubId) > 0 {
+			if filter.SubIdExclude && slices.Contains(filter.SubId, item.Base.SubId) {
+				continue
+			}
+			if !filter.SubIdExclude && !slices.Contains(filter.SubId, item.Base.SubId) {
+				continue
+			}
+		}
+		if filter.AliveStatus != 0 {
+			if item.Info == nil || item.Info.AliveStatus&filter.AliveStatus != filter.AliveStatus {
+				continue
+			}
+		}
+		if len(filter.Country) > 0 {
+			if item.Info == nil {
+				continue
+			}
+			if filter.CountryExclude && slices.Contains(filter.Country, item.Info.Country) {
+				continue
+			}
+			if !filter.CountryExclude && !slices.Contains(filter.Country, item.Info.Country) {
+				continue
+			}
+		}
+		if filter.SpeedUpMore != 0 {
+			if item.Info == nil || item.Info.SpeedUp.Average() < filter.SpeedUpMore {
+				continue
+			}
+		}
+		if filter.SpeedDownMore != 0 {
+			if item.Info == nil || item.Info.SpeedDown.Average() < filter.SpeedDownMore {
+				continue
+			}
+		}
+		if filter.DelayLessThan != 0 {
+			if item.Info == nil || item.Info.Delay.Average() > filter.DelayLessThan {
+				continue
+			}
+		}
+		if filter.RiskLessThan != 0 {
+			if item.Info == nil || item.Info.Risk > filter.RiskLessThan {
+				continue
+			}
+		}
+		result = append(result, item)
+	}
+	return result
 }
 
 func GetFailedBySubId(subId []uint16) []nodeModel.FailedNode {
@@ -731,6 +803,50 @@ func mergeNodesToPool(newNodes []nodeModel.Data) int {
 	return 0
 }
 
+func RebuildPoolFromRegistry(maxSize int) int {
+	items := registry.GetAll()
+	candidates := make([]nodeModel.Data, 0, len(items))
+	for _, item := range items {
+		if item.InitStatus != nodeModel.InitPassed || item.Info == nil {
+			continue
+		}
+		candidates = append(candidates, nodeModel.Data{Base: item.Base, Info: item.Info})
+	}
+	if len(candidates) == 0 {
+		poolMutex.Lock()
+		pool = nil
+		poolMutex.Unlock()
+		return 0
+	}
+	// 同一 unique_key 只保留延迟最小的记录
+	bestByKey := make(map[uint64]nodeModel.Data)
+	for _, node := range candidates {
+		existing, ok := bestByKey[node.Base.UniqueKey]
+		if !ok || node.Info.Delay.Average() < existing.Info.Delay.Average() {
+			bestByKey[node.Base.UniqueKey] = node
+		}
+	}
+	unique := make([]nodeModel.Data, 0, len(bestByKey))
+	for _, node := range bestByKey {
+		unique = append(unique, copyNodeData(node))
+	}
+	sort.Slice(unique, func(i, j int) bool {
+		return unique[i].Info.Delay.Average() < unique[j].Info.Delay.Average()
+	})
+	if maxSize > 0 && len(unique) > maxSize {
+		unique = unique[:maxSize]
+	}
+	poolMutex.Lock()
+	pool = unique
+	poolMutex.Unlock()
+	keys := make([]uint64, 0, len(unique))
+	for _, node := range unique {
+		keys = append(keys, node.Base.UniqueKey)
+	}
+	nodeExist.Reset(keys)
+	return len(unique)
+}
+
 func GetSubInfo(subID uint16) nodeModel.SimpleInfo {
 	refreshMutex.Lock()
 	defer refreshMutex.Unlock()
@@ -758,6 +874,7 @@ func DeleteBySubId(subID uint16) {
 	}
 
 	pool = pool[:end+1]
+	registry.DeleteBySubID(subID)
 }
 
 // saveNodeTestLogs 保存节点测试日志

@@ -10,6 +10,10 @@ export interface NodeResponse {
     risk: number
     alive_status: number
     country: string
+    init_status?: 'unknown' | 'passed' | 'failed'
+    last_check_at?: string
+    last_check_source?: string
+    last_fail_reason?: string
 }
 
 export interface NodeUpdateLog {

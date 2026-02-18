@@ -41,6 +41,8 @@ type nodeMeta struct {
 // @Security BearerAuth
 // @Param sub_id query string false "订阅ID，支持逗号分隔"
 // @Param include_failed query bool false "是否包含初测失败节点"
+// @Param scope query string false "数据范围：registry|pool"
+// @Param status query string false "状态筛选：alive|dead|init_failed|all"
 // @Success 200 {object} resp.ResponseStruct{data=[]node.Response} "获取成功"
 // @Failure 400 {object} resp.ResponseStruct "请求参数错误"
 // @Failure 401 {object} resp.ResponseStruct "未授权"
@@ -48,8 +50,17 @@ type nodeMeta struct {
 func getNodes(c *gin.Context) {
 	subIDRaw := strings.TrimSpace(c.Query("sub_id"))
 	includeFailed := strings.TrimSpace(c.Query("include_failed"))
+	scope := strings.TrimSpace(c.Query("scope"))
+	status := strings.TrimSpace(c.Query("status"))
 	var nodes []nodeModel.Data
+	var records []nodeModel.Record
 	var subIDs []uint16
+	if scope == "" {
+		scope = "registry"
+	}
+	if status == "" {
+		status = "all"
+	}
 	if subIDRaw != "" {
 		ids, err := parseSubIDs(subIDRaw)
 		if err != nil {
@@ -57,49 +68,114 @@ func getNodes(c *gin.Context) {
 			return
 		}
 		subIDs = ids
-		nodes = *node.GetBySubId(ids)
+		if scope == "pool" {
+			nodes = *node.GetBySubId(ids)
+		} else {
+			records = node.GetRegistryBySubId(ids)
+		}
 	} else {
-		nodes = node.GetAll()
+		if scope == "pool" {
+			nodes = node.GetAll()
+		} else {
+			records = node.GetRegistryAll()
+		}
 	}
 
-	respData := make([]nodeModel.Response, 0, len(nodes))
-	for _, n := range nodes {
-		var meta nodeMeta
-		_ = yaml.Unmarshal(n.Base.Raw, &meta)
-
-		item := nodeModel.Response{
-			SubID:       n.Base.SubId,
-			UniqueKey:   n.Base.UniqueKey,
-			Name:        meta.Name,
-			Type:        meta.Type,
-			Country:     "",
-			AliveStatus: 0,
+	respData := make([]nodeModel.Response, 0)
+	if scope == "pool" {
+		respData = make([]nodeModel.Response, 0, len(nodes))
+		for _, n := range nodes {
+			var meta nodeMeta
+			_ = yaml.Unmarshal(n.Base.Raw, &meta)
+			if status != "all" {
+				alive := n.Info != nil && (n.Info.AliveStatus&nodeModel.Alive != 0)
+				if status == "alive" && !alive {
+					continue
+				}
+				if status == "dead" && alive {
+					continue
+				}
+				if status == "init_failed" {
+					continue
+				}
+			}
+			item := nodeModel.Response{
+				SubID:       n.Base.SubId,
+				UniqueKey:   n.Base.UniqueKey,
+				Name:        meta.Name,
+				Type:        meta.Type,
+				Country:     "",
+				AliveStatus: 0,
+				InitStatus:  nodeModel.InitPassed,
+			}
+			if n.Info != nil {
+				item.Delay = n.Info.Delay.Average()
+				item.SpeedUp = n.Info.SpeedUp.Average()
+				item.SpeedDown = n.Info.SpeedDown.Average()
+				item.Risk = n.Info.Risk
+				item.AliveStatus = n.Info.AliveStatus
+				item.Country = n.Info.Country
+			}
+			respData = append(respData, item)
 		}
-		if n.Info != nil {
-			item.Delay = n.Info.Delay.Average()
-			item.SpeedUp = n.Info.SpeedUp.Average()
-			item.SpeedDown = n.Info.SpeedDown.Average()
-			item.Risk = n.Info.Risk
-			item.AliveStatus = n.Info.AliveStatus
-			item.Country = n.Info.Country
+	} else {
+		respData = make([]nodeModel.Response, 0, len(records))
+		for _, record := range records {
+			var meta nodeMeta
+			_ = yaml.Unmarshal(record.Base.Raw, &meta)
+			alive := record.Info != nil && (record.Info.AliveStatus&nodeModel.Alive != 0)
+			if status == "alive" && !alive {
+				continue
+			}
+			if status == "dead" && alive {
+				continue
+			}
+			if status == "init_failed" && record.InitStatus != nodeModel.InitFailed {
+				continue
+			}
+			if status == "all" || status == "init_failed" || status == "alive" || status == "dead" {
+				item := nodeModel.Response{
+					SubID:           record.Base.SubId,
+					UniqueKey:       record.Base.UniqueKey,
+					Name:            meta.Name,
+					Type:            meta.Type,
+					Country:         "",
+					AliveStatus:     0,
+					InitStatus:      record.InitStatus,
+					LastCheckAt:     record.LastCheckAt,
+					LastCheckSource: record.LastCheckSource,
+					LastFailReason:  record.LastFailReason,
+				}
+				if record.Info != nil {
+					item.Delay = record.Info.Delay.Average()
+					item.SpeedUp = record.Info.SpeedUp.Average()
+					item.SpeedDown = record.Info.SpeedDown.Average()
+					item.Risk = record.Info.Risk
+					item.AliveStatus = record.Info.AliveStatus
+					item.Country = record.Info.Country
+				}
+				respData = append(respData, item)
+			}
 		}
-		respData = append(respData, item)
 	}
 
-	if includeFailed == "true" || includeFailed == "1" {
+	if scope != "registry" && (includeFailed == "true" || includeFailed == "1") {
 		if len(subIDs) == 0 {
 			subIDs = node.GetSubIDsFromPool()
 		}
 		failedNodes := node.GetFailedBySubId(subIDs)
-		// 获取池中的节点唯一键集合，用于去重
-		poolNodes := node.GetAll()
-		poolKeys := make(map[uint64]struct{})
-		for _, n := range poolNodes {
-			poolKeys[n.Base.UniqueKey] = struct{}{}
+		// 按 sub_id + unique_key 去重，避免同一节点在池内与失败列表中重复出现
+		type nodeKey struct {
+			subID     uint16
+			uniqueKey uint64
+		}
+		seen := make(map[nodeKey]struct{}, len(respData))
+		for _, item := range respData {
+			seen[nodeKey{subID: item.SubID, uniqueKey: item.UniqueKey}] = struct{}{}
 		}
 		for _, fn := range failedNodes {
-			// 跳过已存在于池中的节点（这些节点应该显示为存活）
-			if _, exists := poolKeys[fn.UniqueKey]; exists {
+			key := nodeKey{subID: fn.SubID, uniqueKey: fn.UniqueKey}
+			if _, exists := seen[key]; exists {
 				continue
 			}
 			respData = append(respData, nodeModel.Response{

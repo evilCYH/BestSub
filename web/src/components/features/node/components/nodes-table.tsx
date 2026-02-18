@@ -74,12 +74,12 @@ export function NodesTable({ nodes, isLoading, error }: NodesTableProps) {
                         {orderedNodes.map((node) => {
                             const statusLabels = formatNodeStatus(node.alive_status)
                             return (
-                            <TableRow key={`${node.sub_id}-${node.unique_key}`}>
+							<TableRow key={`${node.sub_id}-${node.unique_key}`}>
                                 <TableCell className="font-medium">
                                     {node.name || '未命名节点'}
-                                    {node.reason ? (
-                                        <div className="text-xs text-muted-foreground">原因: {node.reason}</div>
-                                    ) : null}
+								{node.reason || node.last_fail_reason ? (
+									<div className="text-xs text-muted-foreground">原因: {node.reason || node.last_fail_reason}</div>
+								) : null}
                                 </TableCell>
                                     <TableCell>{node.type || 'N/A'}</TableCell>
                                     <TableCell className="space-x-1">

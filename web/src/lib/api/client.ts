@@ -232,10 +232,17 @@ export const api = {
     await apiClient.put<ApiResponse<void>>(API_PATH.setting, data)
   },
 
-  async getNodes(subId?: number, includeFailed = false): Promise<NodeResponse[]> {
+  async getNodes(options?: {
+    subId?: number
+    includeFailed?: boolean
+    scope?: 'registry' | 'pool'
+    status?: 'alive' | 'dead' | 'init_failed' | 'all'
+  }): Promise<NodeResponse[]> {
     const params = new URLSearchParams()
-    if (subId) params.set('sub_id', subId.toString())
-    if (includeFailed) params.set('include_failed', '1')
+    if (options?.subId) params.set('sub_id', options.subId.toString())
+    if (options?.includeFailed) params.set('include_failed', '1')
+    if (options?.scope) params.set('scope', options.scope)
+    if (options?.status) params.set('status', options.status)
     const query = params.toString()
     const url = query ? `${API_PATH.node}?${query}` : API_PATH.node
     const response = await apiClient.get<ApiResponse<NodeResponse[]>>(url)

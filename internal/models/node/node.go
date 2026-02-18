@@ -25,6 +25,14 @@ type Base struct {
 	UniqueKey uint64 `json:"unique_key"`
 }
 
+type InitStatus string
+
+const (
+	InitUnknown InitStatus = "unknown"
+	InitPassed  InitStatus = "passed"
+	InitFailed  InitStatus = "failed"
+)
+
 type UniqueKey struct {
 	Server     string `yaml:"server"`
 	Servername string `yaml:"servername"`

@@ -1,5 +1,7 @@
 package node
 
+import "time"
+
 type Response struct {
 	SubID       uint16 `json:"sub_id"`
 	UniqueKey   uint64 `json:"unique_key"`
@@ -12,4 +14,8 @@ type Response struct {
 	Risk        uint8  `json:"risk"`
 	AliveStatus uint64 `json:"alive_status"`
 	Country     string `json:"country"`
+	InitStatus      InitStatus `json:"init_status,omitempty"`
+	LastCheckAt     time.Time  `json:"last_check_at,omitempty"`
+	LastCheckSource string     `json:"last_check_source,omitempty"`
+	LastFailReason  string     `json:"last_fail_reason,omitempty"`
 }
