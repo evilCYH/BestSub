@@ -108,7 +108,7 @@ export function SubList({
                             </div>
 
                             <div className="flex sm:justify-self-center">
-                                <StatusBadge status={sub.status} />
+                                <StatusBadge status={sub.result?.last_status === 'error' ? 'error' : sub.status} />
                             </div>
 
                             <div className="grid gap-1 text-xs sm:grid-cols-2 sm:gap-x-6 sm:pl-35 sm:pr-10">

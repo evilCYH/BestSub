@@ -124,6 +124,10 @@ func UpdateSubResult(ctx context.Context, id uint16, result subModel.Result) err
 	var oldStatus subModel.Result
 	json.Unmarshal([]byte(sub.Result), &oldStatus)
 
+	result.LastStatus = "success"
+	if result.Fail > 0 {
+		result.LastStatus = "error"
+	}
 	result.Success += oldStatus.Success
 	result.Fail += oldStatus.Fail
 	if result.NodeNullCount != 0 {

@@ -20,6 +20,7 @@ export interface SubResult {
     success: number
     fail: number
     msg: string
+    last_status?: 'success' | 'error'
     raw_count: number
     last_run: string
     duration: number

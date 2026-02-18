@@ -42,7 +42,7 @@ export function SubDetail({
                                 <div className="text-muted-foreground"><span>名称:</span> {subscription.name}</div>
                                 <div className="text-muted-foreground"><span>Cron:</span> {subscription.cron_expr}</div>
                                 <div className="text-muted-foreground">
-                                    <span>状态:</span> <StatusBadge status={subscription.status} />
+                                    <span>状态:</span> <StatusBadge status={subscription.result?.last_status === 'error' ? 'error' : subscription.status} />
                                 </div>
                                 {subscription.result?.duration && (
                                     <div className="text-muted-foreground"><span>运行耗时:</span> {formatDuration(subscription.result.duration)}</div>

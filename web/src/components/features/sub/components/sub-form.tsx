@@ -5,6 +5,8 @@ import { Button } from "@/src/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/src/components/ui/dialog"
 import { BasicInfoSection, ConfigSection, ProtocolFilterSection } from "./form-sections"
 import { useCreateSub, useUpdateSub } from '@/src/lib/queries/sub-queries'
+import { useSettings } from '@/src/lib/queries/setting-queries'
+import { SUBCONV_URL } from '@/src/constant/settings-keys'
 import type { SubRequest } from "@/src/types/sub"
 
 interface SubFormProps {
@@ -24,6 +26,7 @@ export function SubForm({
 }: SubFormProps) {
     const createSubMutation = useCreateSub()
     const updateSubMutation = useUpdateSub()
+    const { data: settings = [], isLoading: isLoadingSettings } = useSettings()
     const isEditing = !!editingSubId
 
     const defaultData = useMemo((): SubRequest => ({
@@ -56,6 +59,17 @@ export function SubForm({
     const onSubmit = async (data: SubRequest) => {
         // 防止重复提交
         if (isSubmitting) return
+
+        if (!isEditing && isLoadingSettings) {
+            toast.error('系统设置加载中，请稍后重试')
+            return
+        }
+
+        const subconvSetting = settings.find((item) => item.key === SUBCONV_URL)
+        if (!isEditing && (!subconvSetting || String(subconvSetting.value ?? '').trim() === '')) {
+            toast.error('未设置外部订阅转换地址，请先到系统设置中配置')
+            return
+        }
 
         try {
             if (editingSubId) {

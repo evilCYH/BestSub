@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import { Input } from "@/src/components/ui/input"
+import { ToggleGroup, ToggleGroupItem } from "@/src/components/ui/toggle-group"
 import { SubscriptionColumn } from "./subscription-column"
 import { NodesPanel } from "./nodes-panel"
 import { useSubs } from "@/src/lib/queries/sub-queries"
@@ -10,6 +11,7 @@ export function NodesPage() {
     const { data: subs = [], isLoading: subsLoading, error: subsError } = useSubs()
     const [selectedSub, setSelectedSub] = useState<SubResponse | null>(null)
     const [query, setQuery] = useState("")
+    const [status, setStatus] = useState<'alive' | 'dead'>("alive")
 
     const filteredSubs = useMemo(() => {
         if (!query.trim()) return subs
@@ -19,7 +21,7 @@ export function NodesPage() {
 
     const { data: nodes = [], isLoading: nodesLoading, error: nodesError } = useNodes(selectedSub?.id ?? null, {
         scope: 'registry',
-        status: 'all',
+        status,
         includeFailed: false,
     })
 
@@ -33,13 +35,43 @@ export function NodesPage() {
             </div>
 
             <div className="px-4 lg:px-6">
-                <div className="grid gap-4 lg:grid-cols-[0.7fr_1.6fr] min-w-0">
-                    <div className="space-y-4">
+                <div className="grid gap-4 lg:gap-6 lg:grid-cols-[0.7fr_1.6fr] min-w-0">
+                    <div className="flex items-center gap-3">
                         <Input
                             placeholder="搜索订阅名称"
                             value={query}
                             onChange={(event) => setQuery(event.target.value)}
                         />
+                        <div className="lg:hidden">
+                            <ToggleGroup
+                                type="single"
+                                value={status}
+                                onValueChange={(value) => {
+                                    if (value === "alive" || value === "dead") {
+                                        setStatus(value)
+                                    }
+                                }}
+                            >
+                                <ToggleGroupItem value="alive">存活</ToggleGroupItem>
+                                <ToggleGroupItem value="dead">非存活</ToggleGroupItem>
+                            </ToggleGroup>
+                        </div>
+                    </div>
+                    <div className="hidden lg:flex items-center justify-end">
+                        <ToggleGroup
+                            type="single"
+                            value={status}
+                            onValueChange={(value) => {
+                                if (value === "alive" || value === "dead") {
+                                    setStatus(value)
+                                }
+                            }}
+                        >
+                            <ToggleGroupItem value="alive">存活</ToggleGroupItem>
+                            <ToggleGroupItem value="dead">非存活</ToggleGroupItem>
+                        </ToggleGroup>
+                    </div>
+                    <div className="min-w-0">
                         <SubscriptionColumn
                             subs={filteredSubs}
                             isLoading={subsLoading}
@@ -48,7 +80,6 @@ export function NodesPage() {
                             onSelect={setSelectedSub}
                         />
                     </div>
-
                     <div className="min-w-0">
                         <NodesPanel
                             selectedSub={selectedSub}

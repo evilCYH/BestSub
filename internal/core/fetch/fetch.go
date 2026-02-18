@@ -64,7 +64,11 @@ func Do(ctx context.Context, subID uint16, config string) subModel.Result {
 			log.Warnf("fetch task %d failed: %v", subID, err)
 			continue
 		}
-		contentStr := subconv.ConvertData(string(content), "mihomo")
+		contentStr, err := subconv.ConvertData(string(content), "mihomo")
+		if err != nil {
+			log.Errorf("fetch task %d failed: %v", subID, err)
+			return createFailureResult(err.Error(), startTime)
+		}
 		content = []byte(contentStr)
 
 		globalProtocolFilterEnable := op.GetSettingBool(setting.NODE_PROTOCOL_FILTER_ENABLE)
@@ -252,7 +256,8 @@ func createFailureResult(msg string, startTime time.Time) subModel.Result {
 	return subModel.Result{
 		Success:  0,
 		Fail:     1,
-		Msg:      msg,
+		Msg:        msg,
+		LastStatus: "error",
 		LastRun:  time.Now(),
 		Duration: uint16(time.Since(startTime).Milliseconds()),
 	}
@@ -267,7 +272,8 @@ func createSuccessResult(count uint32, startTime time.Time, nodeNull bool) subMo
 		Success:       1,
 		Fail:          0,
 		NodeNullCount: nodeNullCount,
-		Msg:           "sub updated successfully",
+		Msg:        "sub updated successfully",
+		LastStatus: "success",
 		RawCount:      count,
 		LastRun:       time.Now(),
 		Duration:      uint16(time.Since(startTime).Milliseconds()),

@@ -7,6 +7,8 @@ import { Label } from '@/src/components/ui/label'
 import { toast } from 'sonner'
 import { ConfigSection } from './form-sections'
 import { useBatchCreateSub } from '@/src/lib/queries/sub-queries'
+import { useSettings } from '@/src/lib/queries/setting-queries'
+import { SUBCONV_URL } from '@/src/constant/settings-keys'
 import { generateNameFromUrl } from '../utils'
 import type { SubRequest } from '@/src/types/sub'
 
@@ -22,6 +24,7 @@ interface BatchFormData extends SubRequest {
 export function BatchSubForm({ isOpen, onClose }: BatchSubFormProps) {
     const [isSubmitting, setIsSubmitting] = useState(false)
     const batchCreateMutation = useBatchCreateSub()
+    const { data: settings = [], isLoading: isLoadingSettings } = useSettings()
 
     const form = useForm<BatchFormData>({
         defaultValues: {
@@ -44,6 +47,17 @@ export function BatchSubForm({ isOpen, onClose }: BatchSubFormProps) {
         setIsSubmitting(true)
 
         try {
+            if (isLoadingSettings) {
+                toast.error('系统设置加载中，请稍后重试')
+                return
+            }
+
+            const subconvSetting = settings.find((item) => item.key === SUBCONV_URL)
+            if (!subconvSetting || String(subconvSetting.value ?? '').trim() === '') {
+                toast.error('未设置外部订阅转换地址，请先到系统设置中配置')
+                return
+            }
+
             const urls = data.urls
                 .split('\n')
                 .map(url => url.trim())

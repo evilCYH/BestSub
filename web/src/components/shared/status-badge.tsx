@@ -15,6 +15,7 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
     pending: { variant: 'default', className: 'bg-yellow-500 hover:bg-yellow-600 text-white', text: '等待中' },
     disabled: { variant: 'secondary', className: 'bg-gray-500 hover:bg-gray-600 text-white', text: '已停用' },
     enabled: { variant: 'default', className: 'bg-green-500 hover:bg-green-600 text-white', text: '已启用' },
+    error: { variant: 'default', className: 'bg-red-500 hover:bg-red-600 text-white', text: '错误' },
 } as const
 
 const getUnknownConfig = (status: string): StatusConfig => ({

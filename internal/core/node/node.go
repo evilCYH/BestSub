@@ -137,6 +137,35 @@ func isNetworkError(err error) bool {
 		strings.Contains(errStr, "connection reset")
 }
 
+func classifyTestError(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "certificate has expired") || strings.Contains(msg, "not yet valid") {
+		return "tls_cert_expired"
+	}
+	if strings.Contains(msg, "failed to verify certificate") || strings.Contains(msg, "x509") {
+		return "tls_verify_failed"
+	}
+	if strings.Contains(msg, "unexpected eof") {
+		return "unexpected_eof"
+	}
+	if msg == "eof" || strings.HasSuffix(msg, ": eof") || strings.Contains(msg, " eof") {
+		return "eof"
+	}
+	if isTimeoutError(err) {
+		return "timeout"
+	}
+	if strings.Contains(msg, "no such host") {
+		return "dns_error"
+	}
+	if isNetworkError(err) {
+		return "network_error"
+	}
+	return "request_error"
+}
+
 type addStats struct {
 	subID       uint16
 	start       time.Time
@@ -444,7 +473,7 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 				stats.AddNodeLog(level, nodeName, errMsg)
 				stats.IncFailed()
 				stats.AddDetail("test_request_failed: " + err.Error())
-				UpdateRegistryInitStatus(subID, n.UniqueKey, nodeModel.InitFailed, "test_request_failed")
+				UpdateRegistryInitStatus(subID, n.UniqueKey, nodeModel.InitFailed, classifyTestError(err))
 				stats.AddFailedNode(nodeModel.FailedNode{
 					SubID:     subID,
 					UniqueKey: n.UniqueKey,
@@ -461,7 +490,7 @@ func Add(subID uint16, nodes []nodeModel.Base) int {
 				stats.AddNodeLog("warn", nodeName, msg)
 				stats.IncFailed()
 				stats.AddDetail("unexpected_status: " + response.Status)
-				UpdateRegistryInitStatus(subID, n.UniqueKey, nodeModel.InitFailed, "unexpected_status")
+				UpdateRegistryInitStatus(subID, n.UniqueKey, nodeModel.InitFailed, "unexpected_status_"+response.Status)
 				stats.AddFailedNode(nodeModel.FailedNode{
 					SubID:     subID,
 					UniqueKey: n.UniqueKey,

@@ -33,6 +33,7 @@ type Result struct {
 	Fail          uint16    `json:"fail,omitempty" description:"失败次数"`
 	NodeNullCount uint16    `json:"node_null_count,omitempty" description:"节点为空次数"`
 	Msg           string    `json:"msg,omitempty" description:"消息"`
+	LastStatus    string    `json:"last_status,omitempty" description:"上次运行状态"`
 	RawCount      uint32    `json:"raw_count,omitempty" description:"节点数量"`
 	LastRun       time.Time `json:"last_run,omitempty" description:"上次运行时间"`
 	Duration      uint16    `json:"duration,omitempty" description:"运行时长(单位:毫秒)"`

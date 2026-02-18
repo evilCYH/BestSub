@@ -81,6 +81,9 @@ func (r *registryStore) UpdateAlive(subID uint16, uniqueKey uint64, alive bool, 
 		if alive && delay > 0 {
 			item.Info.Delay.Update(delay)
 		}
+		if !alive && source == "alive_task" {
+			item.LastFailReason = "alive_check_failed"
+		}
 		item.LastCheckAt = time.Now()
 		item.LastCheckSource = source
 		item.UpdatedAt = time.Now()
@@ -143,6 +146,12 @@ func (r *registryStore) UpdateInitStatus(subID uint16, uniqueKey uint64, status 
 		item.InitStatus = status
 		if reason != "" {
 			item.LastFailReason = reason
+		}
+		if status == nodeModel.InitFailed {
+			item.LastCheckAt = time.Now()
+			if item.LastCheckSource == "" {
+				item.LastCheckSource = "initial"
+			}
 		}
 		item.UpdatedAt = time.Now()
 		r.items[key] = item

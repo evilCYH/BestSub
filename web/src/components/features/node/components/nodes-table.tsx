@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/src/components/ui/card"
 import { Table, TableBody, TableHead, TableHeader, TableRow, TableCell } from "@/src/components/ui/table"
 import { InlineLoading } from "@/src/components/ui/loading"
 import { formatSpeed } from "@/src/components/features/sub/utils"
+import { formatTime } from "@/src/utils"
 import { formatNodeStatus, getRiskClass, getRiskLabel } from "../utils"
 import { NODE_STATUS } from "../constants"
 import type { NodeResponse } from "@/src/types"
@@ -64,21 +65,38 @@ export function NodesTable({ nodes, isLoading, error }: NodesTableProps) {
                             <TableHead>节点名称</TableHead>
                             <TableHead>类型</TableHead>
                             <TableHead>状态</TableHead>
-                            <TableHead>延迟</TableHead>
-                            <TableHead>上下行</TableHead>
-                            <TableHead>风险</TableHead>
-                            <TableHead>国家</TableHead>
+                            {orderedNodes.some((node) => node.alive_status & NODE_STATUS.ALIVE) ? (
+                                <>
+                                    <TableHead>延迟</TableHead>
+                                    <TableHead>上下行</TableHead>
+                                    <TableHead>风险</TableHead>
+                                    <TableHead>国家</TableHead>
+                                    <TableHead>最近检测</TableHead>
+                                </>
+                            ) : (
+                                <>
+                                    <TableHead>初测状态</TableHead>
+                                    <TableHead>失败原因</TableHead>
+                                    <TableHead>最近检测</TableHead>
+                                    <TableHead>来源</TableHead>
+                                </>
+                            )}
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {orderedNodes.map((node) => {
                             const statusLabels = formatNodeStatus(node.alive_status)
+                            const isAlive = (node.alive_status & NODE_STATUS.ALIVE) !== 0
+                            const lastCheck = formatTime(node.last_check_at) || '未知'
+                            const lastSource = node.last_check_source || '未知'
                             return (
 							<TableRow key={`${node.sub_id}-${node.unique_key}`}>
                                 <TableCell className="font-medium">
                                     {node.name || '未命名节点'}
-								{node.reason || node.last_fail_reason ? (
-									<div className="text-xs text-muted-foreground">原因: {node.reason || node.last_fail_reason}</div>
+								{isAlive ? (
+									node.reason ? (
+										<div className="text-xs text-muted-foreground">原因: {node.reason}</div>
+									) : null
 								) : null}
                                 </TableCell>
                                     <TableCell>{node.type || 'N/A'}</TableCell>
@@ -91,16 +109,28 @@ export function NodesTable({ nodes, isLoading, error }: NodesTableProps) {
                                             ))
                                         )}
                                     </TableCell>
-                                    <TableCell>{node.delay ? `${node.delay}ms` : 'N/A'}</TableCell>
-                                    <TableCell className="text-xs text-muted-foreground">
-                                        ↑{formatSpeed(node.speed_up || 0)} ↓{formatSpeed(node.speed_down || 0)}
-                                    </TableCell>
-                                    <TableCell>
-                                        <span className={`text-xs font-medium ${getRiskClass(node.risk || 0)}`}>
-                                            {getRiskLabel(node.risk || 0)}
-                                        </span>
-                                    </TableCell>
-                                    <TableCell>{node.country || '未知'}</TableCell>
+                                    {isAlive ? (
+                                        <>
+                                            <TableCell>{node.delay ? `${node.delay}ms` : 'N/A'}</TableCell>
+                                            <TableCell className="text-xs text-muted-foreground">
+                                                ↑{formatSpeed(node.speed_up || 0)} ↓{formatSpeed(node.speed_down || 0)}
+                                            </TableCell>
+                                            <TableCell>
+                                                <span className={`text-xs font-medium ${getRiskClass(node.risk || 0)}`}>
+                                                    {getRiskLabel(node.risk || 0)}
+                                                </span>
+                                            </TableCell>
+                                            <TableCell>{node.country || '未知'}</TableCell>
+                                            <TableCell className="text-xs text-muted-foreground">{lastCheck}</TableCell>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <TableCell>{node.init_status || 'unknown'}</TableCell>
+                                            <TableCell className="text-xs text-muted-foreground">{node.reason || node.last_fail_reason || '未知'}</TableCell>
+                                            <TableCell className="text-xs text-muted-foreground">{lastCheck}</TableCell>
+                                            <TableCell className="text-xs text-muted-foreground">{lastSource}</TableCell>
+                                        </>
+                                    )}
                                 </TableRow>
                             )
                         })}
