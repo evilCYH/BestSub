@@ -32,7 +32,7 @@ export function SubForm({
     const defaultData = useMemo((): SubRequest => ({
         name: '',
         tags: [],
-        enable: true,
+        enable: false,
         cron_expr: '0 */6 * * *',
         config: {
             url: '',

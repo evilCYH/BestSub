@@ -72,18 +72,6 @@ export function ConfigSection({ control }: { control: Control<SubRequest> }) {
                     )}
                 />
 
-                <Label htmlFor="enable">启用订阅</Label>
-                <Controller
-                    name="enable"
-                    control={control}
-                    render={({ field }) => (
-                        <Switch
-                            id="enable"
-                            checked={field.value || false}
-                            onCheckedChange={field.onChange}
-                        />
-                    )}
-                />
             </div>
         </div>
     )

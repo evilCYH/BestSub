@@ -31,7 +31,7 @@ export function BatchSubForm({ isOpen, onClose }: BatchSubFormProps) {
             urls: '',
             name: '',
             tags: [],
-            enable: true,
+            enable: false,
             cron_expr: '0 */1 * * *',
             config: {
                 url: '',
@@ -71,7 +71,7 @@ export function BatchSubForm({ isOpen, onClose }: BatchSubFormProps) {
             const subscriptions: SubRequest[] = urls.map(url => ({
                 name: generateNameFromUrl(url) || '未知订阅',
                 tags: data.tags || [],
-                enable: data.enable,
+                enable: false,
                 cron_expr: data.cron_expr,
                 config: {
                     url,

@@ -10,12 +10,13 @@ interface StatusConfig {
 }
 
 const STATUS_CONFIG: Record<string, StatusConfig> = {
-    running: { variant: 'default', className: 'bg-blue-500 hover:bg-blue-600 text-white', text: '运行中' },
-    scheduled: { variant: 'default', className: 'bg-teal-500 hover:bg-teal-600 text-white', text: '已调度' },
+    running: { variant: 'default', className: 'bg-blue-500 hover:bg-blue-600 text-white', text: '运行' },
+    scheduled: { variant: 'default', className: 'bg-teal-500 hover:bg-teal-600 text-white', text: '启用' },
     pending: { variant: 'default', className: 'bg-yellow-500 hover:bg-yellow-600 text-white', text: '等待中' },
     disabled: { variant: 'secondary', className: 'bg-gray-500 hover:bg-gray-600 text-white', text: '已停用' },
     enabled: { variant: 'default', className: 'bg-green-500 hover:bg-green-600 text-white', text: '已启用' },
     error: { variant: 'default', className: 'bg-red-500 hover:bg-red-600 text-white', text: '错误' },
+    none: { variant: 'secondary', className: 'bg-gray-300 text-gray-600', text: '停用' },
 } as const
 
 const getUnknownConfig = (status: string): StatusConfig => ({

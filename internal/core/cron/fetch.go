@@ -152,11 +152,11 @@ func FetchUpdate(data *subModel.Data) error {
 	return nil
 }
 func FetchStatus(subID uint16, enable bool) string {
-	if !enable {
-		return DisabledStatus
-	}
 	if _, ok := fetchRunning.Load(subID); ok {
 		return RunningStatus
+	}
+	if !enable {
+		return DisabledStatus
 	}
 	if _, ok := fetchScheduled.Load(subID); ok {
 		return ScheduledStatus

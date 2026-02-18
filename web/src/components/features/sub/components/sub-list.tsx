@@ -2,12 +2,13 @@ import { useCallback } from "react"
 import { Button } from "@/src/components/ui/button"
 import { Card, CardContent } from "@/src/components/ui/card"
 import { InlineLoading } from "@/src/components/ui/loading"
+import { Switch } from "@/src/components/ui/switch"
 import { RefreshCw, Edit, Trash2, FileText } from "lucide-react"
 import { toast } from "sonner"
 import { formatLastRunTime } from "@/src/utils"
 import { StatusBadge } from "@/src/components/shared/status-badge"
 import { formatSpeed } from "../utils"
-import { useSubs, useDeleteSub, useRefreshSub } from "@/src/lib/queries/sub-queries"
+import { useSubs, useDeleteSub, useRefreshSub, useUpdateSub } from "@/src/lib/queries/sub-queries"
 import { useAlert } from "@/src/components/providers"
 import type { SubResponse } from "@/src/types/sub"
 
@@ -25,6 +26,7 @@ export function SubList({
     const { data: subs = [], isLoading, error } = useSubs()
     const deleteSubMutation = useDeleteSub()
     const refreshSubMutation = useRefreshSub()
+    const updateSubMutation = useUpdateSub()
     const { confirm } = useAlert()
 
     const handleDelete = useCallback(async (id: number, name: string) => {
@@ -46,6 +48,31 @@ export function SubList({
             }
         }
     }, [confirm, deleteSubMutation])
+
+    const handleToggleEnable = useCallback(async (subscription: SubResponse, enable: boolean) => {
+        try {
+            await updateSubMutation.mutateAsync({
+                id: subscription.id,
+                data: {
+                    name: subscription.name,
+                    tags: subscription.tags || [],
+                    enable,
+                    cron_expr: subscription.cron_expr,
+                    config: {
+                        url: subscription.config.url,
+                        proxy: subscription.config.proxy || false,
+                        timeout: subscription.config.timeout || 10,
+                        protocol_filter_enable: subscription.config.protocol_filter_enable || false,
+                        protocol_filter_mode: subscription.config.protocol_filter_mode || false,
+                        protocol_filter: subscription.config.protocol_filter || [],
+                    },
+                },
+            })
+        } catch (error) {
+            toast.error('更新订阅启用状态失败')
+            console.error('Failed to update subscription enable state:', error)
+        }
+    }, [updateSubMutation])
 
     const handleRefresh = useCallback(async (id: number) => {
         try {
@@ -107,8 +134,13 @@ export function SubList({
                                 <div className="text-xs text-muted-foreground">{sub?.cron_expr || 'N/A'}</div>
                             </div>
 
-                            <div className="flex sm:justify-self-center">
-                                <StatusBadge status={sub.result?.last_status === 'error' ? 'error' : sub.status} />
+                            <div className="flex items-center gap-3 sm:justify-self-center">
+                                <Switch
+                                    checked={sub.enable}
+                                    onCheckedChange={(checked) => handleToggleEnable(sub, checked)}
+                                    disabled={updateSubMutation.isPending}
+                                />
+                                <StatusBadge status={sub.status === 'running' ? 'running' : (sub.result?.last_status === 'error' || sub.status === 'pending' ? 'error' : (sub.enable ? sub.status : 'none'))} />
                             </div>
 
                             <div className="grid gap-1 text-xs sm:grid-cols-2 sm:gap-x-6 sm:pl-35 sm:pr-10">
