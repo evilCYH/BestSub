@@ -13,7 +13,11 @@ export function useSubs() {
     return useQuery({
         queryKey: subKeys.lists(),
         queryFn: () => api.getSub(),
-        refetchInterval: 60 * 1000,
+        refetchInterval: (query) =>
+            Array.isArray(query.state.data) &&
+            query.state.data.some(sub => sub.status === 'running')
+                ? 2000
+                : 60 * 1000,
         notifyOnChangeProps: ['data', 'error', 'isLoading'],
     })
 }

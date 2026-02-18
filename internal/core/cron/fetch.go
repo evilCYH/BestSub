@@ -2,7 +2,6 @@ package cron
 
 import (
 	"context"
-	"encoding/json"
 	"math/rand"
 	"time"
 
@@ -37,27 +36,7 @@ func FetchAdd(data *subModel.Data) error {
 
 	fetchFunc.Store(subID, cronFunc{
 		fn: func() {
-			fetchCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			fetchRunning.Store(subID, cancel)
-			defer func() {
-				cancel()
-				fetchRunning.Delete(subID)
-			}()
-			result := fetch.Do(fetchCtx, subID, config)
-			updateCtx, updateCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			if err := op.UpdateSubResult(updateCtx, subID, result); err != nil {
-				log.Warnf("failed to update sub result: %v", err)
-			}
-			updateCancel()
-			sub, err := op.GetSubByID(context.Background(), subID)
-			if err != nil {
-				log.Warnf("failed to get sub by id: %v", err)
-				return
-			}
-			if !sub.Enable {
-				FetchDisable(subID)
-				log.Infof("fetch task %d auto disable", subID)
-			}
+			runFetch(subID, config)
 		},
 		cronExpr: cronExpr,
 	})
@@ -67,10 +46,34 @@ func FetchAdd(data *subModel.Data) error {
 	return nil
 }
 
+
+func runFetch(subID uint16, config string) subModel.Result {
+	fetchCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	fetchRunning.Store(subID, cancel)
+	defer func() {
+		cancel()
+		fetchRunning.Delete(subID)
+	}()
+	result := fetch.Do(fetchCtx, subID, config)
+	updateCtx, updateCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if err := op.UpdateSubResult(updateCtx, subID, result); err != nil {
+		log.Warnf("failed to update sub result: %v", err)
+	}
+	updateCancel()
+	sub, err := op.GetSubByID(context.Background(), subID)
+	if err != nil {
+		log.Warnf("failed to get sub by id: %v", err)
+		return result
+	}
+	if !sub.Enable {
+		FetchDisable(subID)
+		log.Infof("fetch task %d auto disable", subID)
+	}
+	return result
+}
+
 func FetchRun(subID uint16) subModel.Result {
-	if ft, ok := fetchFunc.Load(subID); ok {
-		ft.fn()
-	} else {
+	if _, ok := fetchFunc.Load(subID); !ok {
 		log.Warnf("fetch task %d not found", subID)
 		return subModel.Result{
 			Msg:     "fetch task not found",
@@ -85,15 +88,7 @@ func FetchRun(subID uint16) subModel.Result {
 			LastRun: time.Now(),
 		}
 	}
-	var result subModel.Result
-	if err := json.Unmarshal([]byte(sub.Result), &result); err != nil {
-		log.Warnf("failed to unmarshal sub result: %v", err)
-		return subModel.Result{
-			Msg:     "failed to unmarshal sub result",
-			LastRun: time.Now(),
-		}
-	}
-	return result
+	return runFetch(subID, sub.Config)
 }
 
 func FetchEnable(subID uint16) error {

@@ -266,8 +266,8 @@ func refreshSub(c *gin.Context) {
 		resp.ErrorBadRequest(c)
 		return
 	}
-	result := cron.FetchRun(uint16(id))
-	resp.Success(c, result)
+	go cron.FetchRun(uint16(id))
+	resp.Success(c, nil)
 }
 
 // batchCreateSub 批量创建订阅链接
